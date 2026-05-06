@@ -1,20 +1,24 @@
 import React, { useCallback, useState } from 'react';
-import { Monitor, Tablet, Smartphone, Trash2, ChevronDown, ChevronRight, ChevronLeft, PanelRightOpen } from 'lucide-react';
+import { Monitor, Tablet, Smartphone, Trash2, ChevronDown, ChevronRight, ChevronLeft, PanelRightOpen, ParkingCircle } from 'lucide-react';
 import { UNITS, UNIT_LABELS, BREAKPOINTS, BREAKPOINT_IDS, RESPONSIVE_BEHAVIORS, ARCHETYPES } from '../engine/responsiveUnits.js';
 import { tokens } from './designTokens.js';
 
 const BP_ICONS = { desktop: Monitor, tablet: Tablet, mobile: Smartphone };
 
-export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdateProp, onChangeBehavior, onRemoveElement }) {
+export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdateProp, onChangeBehavior, onRemoveElement, onParkElement, onUnparkElement }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const bpProps = element?.responsiveProps?.[breakpointId] || {};
   const desktopProps = element?.responsiveProps?.desktop || {};
   const effectiveProps = { ...desktopProps, ...bpProps };
 
+  const isParked = element?.location === 'parkingLot';
   const archetype = element?.archetype || element?.componentId;
   const archetypeDef = archetype ? ARCHETYPES[archetype] : null;
-  const allowedBehaviors = archetypeDef?.behaviors || Object.keys(RESPONSIVE_BEHAVIORS);
+  let allowedBehaviors = archetypeDef?.behaviors || Object.keys(RESPONSIVE_BEHAVIORS);
+  if (isParked) {
+    allowedBehaviors = allowedBehaviors.filter((b) => b !== 'stretch');
+  }
   const currentBehavior = element?.behavior || archetypeDef?.defaultBehavior || 'scaleProportionally';
   const beh = RESPONSIVE_BEHAVIORS[currentBehavior];
 
@@ -45,9 +49,30 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
       <div style={styles.header}>
         <div>
           <div style={styles.name}>{element.name}</div>
-          <div style={styles.id}>{element.componentId}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+            <span style={styles.id}>{element.componentId}</span>
+            {isParked && (
+              <span style={styles.parkedBadge}>Parked</span>
+            )}
+          </div>
         </div>
       </div>
+      {isParked && onUnparkElement && (
+        <button
+          onClick={() => onUnparkElement(element.id)}
+          style={styles.moveToStageBtn}
+        >
+          Move to Stage
+        </button>
+      )}
+      {!isParked && onParkElement && (
+        <button
+          onClick={() => onParkElement(element.id, 'left', 40, 40)}
+          style={styles.moveToParkingBtn}
+        >
+          Move to Parking Lot
+        </button>
+      )}
 
       <div style={styles.bpIndicator}>
         {BREAKPOINT_IDS.map((bp) => {
@@ -306,6 +331,28 @@ const styles = {
     backgroundColor: 'transparent', color: tokens.danger,
     fontSize: 12, fontWeight: 500, cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+    transition: `background-color ${tokens.durFast} ${tokens.easeOut}`,
+  },
+  parkedBadge: {
+    fontSize: 9, fontWeight: 600, color: tokens.text3,
+    backgroundColor: 'rgba(0,0,0,0.06)',
+    padding: '1px 6px', borderRadius: tokens.radiusFull,
+    letterSpacing: '0.04em', textTransform: 'uppercase',
+  },
+  moveToStageBtn: {
+    width: 'calc(100% - 24px)', margin: '0 12px', padding: '7px 0',
+    border: `1px solid ${tokens.accent}`, borderRadius: tokens.radiusMd,
+    backgroundColor: tokens.accentSoft, color: tokens.accent,
+    fontSize: 11, fontWeight: 600, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+    transition: `background-color ${tokens.durFast} ${tokens.easeOut}`,
+  },
+  moveToParkingBtn: {
+    width: 'calc(100% - 24px)', margin: '0 12px', padding: '7px 0',
+    border: `1px solid ${tokens.controlBorder}`, borderRadius: tokens.radiusMd,
+    backgroundColor: 'rgba(0,0,0,0.02)', color: tokens.text2,
+    fontSize: 11, fontWeight: 500, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
     transition: `background-color ${tokens.durFast} ${tokens.easeOut}`,
   },
 };

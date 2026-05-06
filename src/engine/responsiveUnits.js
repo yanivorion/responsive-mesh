@@ -216,6 +216,7 @@ export function createElement(componentId, componentName, x, y, w = 280, h = 200
     archetype,
     name: componentName,
     behavior,
+    location: 'stage',
     props: defaultPropsFor(componentId),
     responsiveProps: {
       desktop: desktopProps,

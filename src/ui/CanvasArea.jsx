@@ -9,6 +9,8 @@ const DOT_RADIUS = 0.6;
 const DOT_COLOR = 'rgba(0,0,0,0.08)';
 const BP_ICONS = { desktop: Monitor, tablet: Tablet, mobile: Smartphone };
 const FRAME_GAP = 48;
+const PL_GAP = 16;
+const PL_MIN_HEIGHT = 200;
 
 function useDotPattern() {
   return useMemo(() => ({
@@ -26,6 +28,8 @@ export function CanvasArea({
   onMoveElement,
   onResizeElement,
   onDropComponent,
+  onParkElement,
+  onUnparkElement,
   breakpointId,
   referenceWidth,
   isGenerating,
@@ -150,6 +154,8 @@ export function CanvasArea({
               onMoveElement={onMoveElement}
               onResizeElement={onResizeElement}
               onDropComponent={onDropComponent}
+              onParkElement={onParkElement}
+              onUnparkElement={onUnparkElement}
               referenceWidth={referenceWidth}
               scale={scale}
               isPanning={isPanning}
@@ -190,55 +196,20 @@ export function CanvasArea({
                               </span>
                             </div>
                           )}
-                          {elements.map((el) => {
-                            const r = resolveElementProps(el, bpId, { canvasWidth: w, parentWidth: w, referenceWidth });
-                            const eX = r.x === 'auto' ? 0 : r.x;
-                            const eY = r.y === 'auto' ? 0 : r.y;
-                            const eW = r.width === 'auto' ? 280 : r.width;
-                            const eH = r.height === 'auto' ? 200 : r.height;
-                            const parked = computeOutsideRatio(eX, eY, eW, eH, w, canvasHeight) > 0.5;
-                            if (parked) return null;
-                            return (
-                              <StageElement
-                                key={el.id}
-                                element={el}
-                                isSelected={false}
-                                breakpointId={bpId}
-                                ctx={{ canvasWidth: w, parentWidth: w, referenceWidth }}
-                                scale={scale}
-                                isPanning={false}
-                                isActive={false}
-                                frameWidth={w}
-                                frameHeight={canvasHeight}
-                              />
-                            );
-                          })}
-                        </div>
-                        {/* Parked elements — overview */}
-                        <div style={{ position: 'absolute', inset: 0, overflow: 'visible', pointerEvents: 'none' }}>
-                          {elements.map((el) => {
-                            const r = resolveElementProps(el, bpId, { canvasWidth: w, parentWidth: w, referenceWidth });
-                            const eX = r.x === 'auto' ? 0 : r.x;
-                            const eY = r.y === 'auto' ? 0 : r.y;
-                            const eW = r.width === 'auto' ? 280 : r.width;
-                            const eH = r.height === 'auto' ? 200 : r.height;
-                            const parked = computeOutsideRatio(eX, eY, eW, eH, w, canvasHeight) > 0.5;
-                            if (!parked) return null;
-                            return (
-                              <StageElement
-                                key={`parked-${el.id}`}
-                                element={el}
-                                isSelected={false}
-                                breakpointId={bpId}
-                                ctx={{ canvasWidth: w, parentWidth: w, referenceWidth }}
-                                scale={scale}
-                                isPanning={false}
-                                isActive={false}
-                                frameWidth={w}
-                                frameHeight={canvasHeight}
-                              />
-                            );
-                          })}
+                          {elements.filter((el) => el.location !== 'parkingLot').map((el) => (
+                            <StageElement
+                              key={el.id}
+                              element={el}
+                              isSelected={false}
+                              breakpointId={bpId}
+                              ctx={{ canvasWidth: w, parentWidth: w, referenceWidth }}
+                              scale={scale}
+                              isPanning={false}
+                              isActive={false}
+                              frameWidth={w}
+                              frameHeight={canvasHeight}
+                            />
+                          ))}
                         </div>
                       </div>
                     </div>
@@ -266,11 +237,70 @@ export function CanvasArea({
 }
 
 // ═══════════════════════════════════════════
-// FOCUSED FRAME (with edge handles)
+// PARKING LOT ZONE
+// ═══════════════════════════════════════════
+function ParkingLotZone({
+  side, elements, selectedElementId, onSelectElement,
+  onMoveElement, onResizeElement, onUnparkElement,
+  breakpointId, ctx, scale, isPanning, frameHeight,
+}) {
+  const parkedElements = elements.filter((el) => el.location === 'parkingLot');
+  const sideElements = parkedElements.filter((el) => (el.parkingSide || 'left') === side);
+  if (sideElements.length === 0) return null;
+
+  const plWidth = ctx.canvasWidth;
+  const maxBottom = sideElements.reduce((acc, el) => {
+    const r = resolveElementProps(el, breakpointId, ctx);
+    const eY = r.y === 'auto' ? 0 : r.y;
+    const eH = r.height === 'auto' ? 200 : r.height;
+    return Math.max(acc, eY + eH + 24);
+  }, PL_MIN_HEIGHT);
+  const plHeight = Math.max(frameHeight, maxBottom);
+
+  return (
+    <div style={{
+      width: plWidth,
+      height: plHeight,
+      position: 'relative',
+      backgroundColor: 'rgba(245, 245, 248, 0.6)',
+      borderRadius: tokens.radiusLg,
+      border: `1px dashed ${tokens.controlBorder}`,
+      flexShrink: 0,
+      overflow: 'visible',
+    }}>
+      <div style={styles.plLabel}>
+        <span>Parking Lot</span>
+      </div>
+      {sideElements.map((el) => (
+        <StageElement
+          key={el.id}
+          element={el}
+          isSelected={selectedElementId === el.id}
+          onSelect={() => onSelectElement(el.id)}
+          onMove={(dx, dy) => onMoveElement(el.id, dx, dy)}
+          onResize={(dw, dh, dx, dy) => onResizeElement(el.id, dw, dh, dx, dy)}
+          breakpointId={breakpointId}
+          ctx={ctx}
+          scale={scale}
+          isPanning={isPanning}
+          isActive={true}
+          frameWidth={plWidth}
+          frameHeight={plHeight}
+          isInParkingLot={true}
+          onUnpark={onUnparkElement ? () => onUnparkElement(el.id) : undefined}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════
+// FOCUSED FRAME (with edge handles + parking lot)
 // ═══════════════════════════════════════════
 function FocusedFrame({
   bpId, canvasHeight, elements, selectedElementId,
   onSelectElement, onMoveElement, onResizeElement, onDropComponent,
+  onParkElement, onUnparkElement,
   referenceWidth, scale, isPanning, isGenerating, uniqueId, onOpenInspiration, hasElements,
 }) {
   const bp = BREAKPOINTS[bpId];
@@ -285,6 +315,11 @@ function FocusedFrame({
   const ctx = useMemo(() => ({
     canvasWidth: frameWidth, parentWidth: frameWidth, referenceWidth,
   }), [frameWidth, referenceWidth]);
+
+  const stageElements = elements.filter((el) => el.location !== 'parkingLot');
+  const hasParkedLeft = elements.some((el) => el.location === 'parkingLot' && (el.parkingSide || 'left') === 'left');
+  const hasParkedRight = elements.some((el) => el.location === 'parkingLot' && (el.parkingSide || 'left') === 'right');
+  const stageHasElements = stageElements.length > 0 || isGenerating;
 
   // --- Drop ---
   const handleDragOver = useCallback((e) => {
@@ -342,6 +377,31 @@ function FocusedFrame({
     document.addEventListener('mouseup', onUp);
   }, [frameWidth, defaultWidth, scale]);
 
+  // Detect when a stage element is dragged past the frame boundary and auto-park it
+  const handleMoveWithBoundary = useCallback((elId, dx, dy) => {
+    const el = elements.find((e) => e.id === elId);
+    if (!el) return;
+    if (el.location === 'parkingLot') {
+      onMoveElement(elId, dx, dy);
+      return;
+    }
+    const r = resolveElementProps(el, bpId, ctx);
+    const newX = (r.x === 'auto' ? 0 : r.x) + dx;
+    const newY = (r.y === 'auto' ? 0 : r.y) + dy;
+    const elW = r.width === 'auto' ? 280 : r.width;
+    const elH = r.height === 'auto' ? 200 : r.height;
+    const outsideRatio = computeOutsideRatio(newX, newY, elW, elH, frameWidth, canvasHeight);
+
+    if (outsideRatio > 0.6 && onParkElement) {
+      const side = (newX + elW / 2) < frameWidth / 2 ? 'left' : 'right';
+      const plX = Math.max(16, Math.min(frameWidth - elW - 16, newX < 0 ? Math.abs(newX) : newX - frameWidth));
+      const plY = Math.max(32, newY < 0 ? 16 : newY);
+      onParkElement(elId, side, plX, plY);
+    } else {
+      onMoveElement(elId, dx, dy);
+    }
+  }, [elements, bpId, ctx, frameWidth, canvasHeight, onMoveElement, onParkElement]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0, alignItems: 'center' }}>
       <div style={styles.focusLabel}>
@@ -350,103 +410,110 @@ function FocusedFrame({
         <span style={{ fontWeight: 400, opacity: 0.7 }}>{Math.round(frameWidth)}px</span>
       </div>
 
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'stretch' }}>
-        {/* Left edge handle */}
-        <div
-          onMouseDown={(e) => handleEdgeDrag(e, 'left')}
-          style={styles.edgeHandle}
-        >
-          <div style={styles.edgeHandleBar} />
-        </div>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: PL_GAP }}>
+        {/* Left Parking Lot */}
+        {hasParkedLeft && (
+          <ParkingLotZone
+            side="left"
+            elements={elements}
+            selectedElementId={selectedElementId}
+            onSelectElement={onSelectElement}
+            onMoveElement={onMoveElement}
+            onResizeElement={onResizeElement}
+            onUnparkElement={onUnparkElement}
+            breakpointId={bpId}
+            ctx={ctx}
+            scale={scale}
+            isPanning={isPanning}
+            frameHeight={canvasHeight}
+          />
+        )}
 
-        {/* Frame */}
-        <div style={{
-          ...styles.focusFrame,
-          width: frameWidth,
-          height: canvasHeight,
-          transition: springing ? `width 350ms ${tokens.easeOut}` : 'none',
-        }}>
+        <div style={{ display: 'flex', alignItems: 'stretch' }}>
+          {/* Left edge handle */}
           <div
-            ref={canvasRef}
-            style={{
-              ...styles.canvasBody,
-              outline: dragOver ? `2px dashed ${tokens.accent}` : 'none',
-              outlineOffset: -2,
-            }}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onClick={isPanning ? undefined : handleCanvasClick}
+            onMouseDown={(e) => handleEdgeDrag(e, 'left')}
+            style={styles.edgeHandle}
           >
-            {!hasElements && !isGenerating && (
-              <EmptyState onOpenInspiration={onOpenInspiration} />
-            )}
-            {isGenerating && <LoadingState uniqueId={uniqueId} />}
-            {elements.map((el) => {
-              const r = resolveElementProps(el, bpId, ctx);
-              const eX = r.x === 'auto' ? 0 : r.x;
-              const eY = r.y === 'auto' ? 0 : r.y;
-              const eW = r.width === 'auto' ? 280 : r.width;
-              const eH = r.height === 'auto' ? 200 : r.height;
-              const parked = computeOutsideRatio(eX, eY, eW, eH, frameWidth, canvasHeight) > 0.5;
-              if (parked) return null;
-              return (
-                <StageElement
-                  key={el.id}
-                  element={el}
-                  isSelected={selectedElementId === el.id}
-                  onSelect={() => onSelectElement(el.id)}
-                  onMove={(dx, dy) => onMoveElement(el.id, dx, dy)}
-                  onResize={(dw, dh, dx, dy) => onResizeElement(el.id, dw, dh, dx, dy)}
-                  breakpointId={bpId}
-                  ctx={ctx}
-                  scale={scale}
-                  isPanning={isPanning}
-                  isActive={true}
-                  frameWidth={frameWidth}
-                  frameHeight={canvasHeight}
-                />
-              );
-            })}
+            <div style={styles.edgeHandleBar} />
           </div>
-          {/* Parked elements layer — outside clipping, inside frame for positioning */}
-          <div style={{ position: 'absolute', inset: 0, overflow: 'visible', pointerEvents: 'none' }}>
-            {elements.map((el) => {
-              const r = resolveElementProps(el, bpId, ctx);
-              const eX = r.x === 'auto' ? 0 : r.x;
-              const eY = r.y === 'auto' ? 0 : r.y;
-              const eW = r.width === 'auto' ? 280 : r.width;
-              const eH = r.height === 'auto' ? 200 : r.height;
-              const parked = computeOutsideRatio(eX, eY, eW, eH, frameWidth, canvasHeight) > 0.5;
-              if (!parked) return null;
-              return (
-                <StageElement
-                  key={`parked-${el.id}`}
-                  element={el}
-                  isSelected={selectedElementId === el.id}
-                  onSelect={() => onSelectElement(el.id)}
-                  onMove={(dx, dy) => onMoveElement(el.id, dx, dy)}
-                  onResize={(dw, dh, dx, dy) => onResizeElement(el.id, dw, dh, dx, dy)}
-                  breakpointId={bpId}
-                  ctx={ctx}
-                  scale={scale}
-                  isPanning={isPanning}
-                  isActive={true}
-                  frameWidth={frameWidth}
-                  frameHeight={canvasHeight}
-                />
-              );
-            })}
+
+          {/* Frame */}
+          <div style={{
+            ...styles.focusFrame,
+            width: frameWidth,
+            height: canvasHeight,
+            transition: springing ? `width 350ms ${tokens.easeOut}` : 'none',
+          }}>
+            <div
+              ref={canvasRef}
+              style={{
+                ...styles.canvasBody,
+                outline: dragOver ? `2px dashed ${tokens.accent}` : 'none',
+                outlineOffset: -2,
+              }}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={isPanning ? undefined : handleCanvasClick}
+            >
+              {!stageHasElements && !isGenerating && (
+                <EmptyState onOpenInspiration={onOpenInspiration} />
+              )}
+              {isGenerating && <LoadingState uniqueId={uniqueId} />}
+              {stageElements.map((el) => {
+                const r = resolveElementProps(el, bpId, ctx);
+                const eX = r.x === 'auto' ? 0 : r.x;
+                const eY = r.y === 'auto' ? 0 : r.y;
+                const eW = r.width === 'auto' ? 280 : r.width;
+                const eH = r.height === 'auto' ? 200 : r.height;
+                return (
+                  <StageElement
+                    key={el.id}
+                    element={el}
+                    isSelected={selectedElementId === el.id}
+                    onSelect={() => onSelectElement(el.id)}
+                    onMove={(dx, dy) => handleMoveWithBoundary(el.id, dx, dy)}
+                    onResize={(dw, dh, dx, dy) => onResizeElement(el.id, dw, dh, dx, dy)}
+                    breakpointId={bpId}
+                    ctx={ctx}
+                    scale={scale}
+                    isPanning={isPanning}
+                    isActive={true}
+                    frameWidth={frameWidth}
+                    frameHeight={canvasHeight}
+                  />
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Right edge handle */}
+          <div
+            onMouseDown={(e) => handleEdgeDrag(e, 'right')}
+            style={styles.edgeHandle}
+          >
+            <div style={styles.edgeHandleBar} />
           </div>
         </div>
 
-        {/* Right edge handle */}
-        <div
-          onMouseDown={(e) => handleEdgeDrag(e, 'right')}
-          style={styles.edgeHandle}
-        >
-          <div style={styles.edgeHandleBar} />
-        </div>
+        {/* Right Parking Lot */}
+        {hasParkedRight && (
+          <ParkingLotZone
+            side="right"
+            elements={elements}
+            selectedElementId={selectedElementId}
+            onSelectElement={onSelectElement}
+            onMoveElement={onMoveElement}
+            onResizeElement={onResizeElement}
+            onUnparkElement={onUnparkElement}
+            breakpointId={bpId}
+            ctx={ctx}
+            scale={scale}
+            isPanning={isPanning}
+            frameHeight={canvasHeight}
+          />
+        )}
       </div>
     </div>
   );
@@ -470,7 +537,7 @@ function computeOutsideRatio(elX, elY, elW, elH, frameW, frameH) {
 
 const HATCH_SVG = `url("data:image/svg+xml,%3Csvg width='8' height='8' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M-2 2L2-2M0 8L8 0M6 10L10 6' stroke='%23${tokens.accent.replace('#', '')}' stroke-width='1' opacity='0.25'/%3E%3C/svg%3E")`;
 
-function StageElement({ element, isSelected, onSelect, onMove, onResize, breakpointId, ctx, scale, isPanning, isActive, frameWidth, frameHeight }) {
+function StageElement({ element, isSelected, onSelect, onMove, onResize, breakpointId, ctx, scale, isPanning, isActive, frameWidth, frameHeight, isInParkingLot, onUnpark }) {
   const resolved = resolveElementProps(element, breakpointId, ctx);
   const dragRef = useRef(null);
   const [interacting, setInteracting] = useState(false);
@@ -480,8 +547,7 @@ function StageElement({ element, isSelected, onSelect, onMove, onResize, breakpo
   const w = resolved.width === 'auto' ? 280 : resolved.width;
   const h = resolved.height === 'auto' ? 200 : resolved.height;
 
-  const outsideRatio = (frameWidth && frameHeight) ? computeOutsideRatio(x, y, w, h, frameWidth, frameHeight) : 0;
-  const isParked = outsideRatio > 0.5;
+  const isParked = isInParkingLot || element.location === 'parkingLot';
 
   const beh = element.behavior && RESPONSIVE_BEHAVIORS[element.behavior];
   const isWrap = element.behavior === 'wrap';
@@ -588,7 +654,7 @@ function StageElement({ element, isSelected, onSelect, onMove, onResize, breakpo
         pointerEvents: isActive ? 'auto' : 'none',
       }}
     >
-      <div style={{ pointerEvents: 'none', width: '100%', height: autoHeight ? 'auto' : '100%', overflow: autoHeight ? 'visible' : 'hidden', borderRadius: tokens.radiusSm, opacity: isParked ? 0.45 : 1 }}>
+      <div style={{ pointerEvents: 'none', width: '100%', height: autoHeight ? 'auto' : '100%', overflow: autoHeight ? 'visible' : 'hidden', borderRadius: tokens.radiusSm }}>
         <PreviewRegistry
           id={element.componentId}
           width={Math.round(w)}
@@ -598,17 +664,18 @@ function StageElement({ element, isSelected, onSelect, onMove, onResize, breakpo
           fontScale={fontScale}
         />
       </div>
-      {isParked && (
-        <div style={{
-          position: 'absolute', inset: 0,
-          borderRadius: tokens.radiusSm,
-          backgroundImage: HATCH_SVG,
-          backgroundRepeat: 'repeat',
-          pointerEvents: 'none',
-          zIndex: 2,
-        }} />
+      <div style={{
+        ...styles.nameTag,
+        backgroundColor: isParked ? `${tokens.text3}dd` : `${tokens.accent}dd`,
+      }}>{element.name}</div>
+      {isSelected && isParked && onUnpark && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onUnpark(); }}
+          style={styles.unparkBtn}
+        >
+          Move to Stage
+        </button>
       )}
-      <div style={styles.nameTag}>{element.name}</div>
       {isSelected && (
         <>
           <div style={styles.unitBadgeX}>
@@ -783,6 +850,22 @@ const styles = {
     backgroundColor: tokens.accent,
     opacity: 0.35,
     transition: `opacity ${tokens.durFast} ${tokens.easeOut}`,
+  },
+
+  // ── Parking Lot ──
+  plLabel: {
+    position: 'absolute', top: 8, left: 12,
+    fontSize: 10, fontWeight: 600, color: tokens.text3,
+    letterSpacing: '0.06em', textTransform: 'uppercase',
+    pointerEvents: 'none', opacity: 0.7,
+  },
+  unparkBtn: {
+    position: 'absolute', top: -28, right: 0,
+    padding: '4px 10px', fontSize: 10, fontWeight: 600,
+    backgroundColor: tokens.accent, color: '#fff',
+    border: 'none', borderRadius: tokens.radiusMd,
+    cursor: 'pointer', whiteSpace: 'nowrap', zIndex: 10,
+    boxShadow: tokens.shadowSubtle,
   },
 
   // ── Stage element ──

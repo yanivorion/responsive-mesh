@@ -7,6 +7,7 @@ import { Copilot } from './ui/Copilot.jsx';
 import { CanvasArea } from './ui/CanvasArea.jsx';
 import { InspectorPanel } from './ui/InspectorPanel.jsx';
 import { AddElementsPanel } from './ui/AddElementsPanel.jsx';
+import { LayersPanel } from './ui/LayersPanel.jsx';
 import { createElement, rv, BREAKPOINTS, RESPONSIVE_BEHAVIORS, defaultMarginUnit, pxToUnit } from './engine/responsiveUnits.js';
 import { applyHeuristics } from './engine/heuristics.js';
 import { parseLayoutText, layoutToElements } from './engine/layoutParser.js';
@@ -57,6 +58,7 @@ export default function Component({ config = {} }) {
   const [selectedElementId, setSelectedElementId] = useState(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [addElementsOpen, setAddElementsOpen] = useState(false);
+  const [layersOpen, setLayersOpen] = useState(false);
   const [zoom, setZoom] = useState(45);
 
   // Focus mode: null = overview, string = focused breakpoint id
@@ -123,6 +125,7 @@ export default function Component({ config = {} }) {
   }, [activeBreakpoints, handleFocusBreakpoint]);
 
   const handleToggleAddElements = useCallback(() => setAddElementsOpen((v) => !v), []);
+  const handleToggleLayers = useCallback(() => setLayersOpen((v) => !v), []);
 
   const handleAddElementFromPanel = useCallback((componentId, componentName, defaultW, defaultH) => {
     const w = defaultW || 280;
@@ -346,6 +349,55 @@ export default function Component({ config = {} }) {
     setSelectedElementId(null);
   }, [selectedElementId]);
 
+  // --- Parking Lot handlers ---
+  const handleParkElement = useCallback((elId, side, plX, plY) => {
+    setElements((prev) =>
+      prev.map((el) => {
+        if (el.id !== elId) return el;
+        const bp = breakpointId;
+        const current = el.responsiveProps[bp] || el.responsiveProps.desktop || {};
+        return {
+          ...el,
+          location: 'parkingLot',
+          parkingSide: side,
+          responsiveProps: {
+            ...el.responsiveProps,
+            [bp]: {
+              ...current,
+              x: rv(plX, current.x?.unit || 'px'),
+              y: rv(plY, current.y?.unit || 'px'),
+            },
+          },
+        };
+      })
+    );
+  }, [breakpointId]);
+
+  const handleUnparkElement = useCallback((elId) => {
+    setElements((prev) =>
+      prev.map((el) => {
+        if (el.id !== elId) return el;
+        const desktopWidth = BREAKPOINTS[breakpointId]?.defaultWidth || 1280;
+        const bp = breakpointId;
+        const current = el.responsiveProps[bp] || el.responsiveProps.desktop || {};
+        const elW = current.width?.value ?? 280;
+        return {
+          ...el,
+          location: 'stage',
+          parkingSide: undefined,
+          responsiveProps: {
+            ...el.responsiveProps,
+            [bp]: {
+              ...current,
+              x: rv(desktopWidth / 2 - elW / 2, current.x?.unit || 'px'),
+              y: rv(80, current.y?.unit || 'px'),
+            },
+          },
+        };
+      })
+    );
+  }, [breakpointId]);
+
   const handleImportLayout = useCallback((rawText) => {
     try {
       const layouts = parseLayoutText(rawText);
@@ -359,6 +411,28 @@ export default function Component({ config = {} }) {
       console.error('Layout import failed:', err);
     }
   }, [referenceWidth]);
+
+  // --- Duplicate element ---
+  const handleDuplicateElement = useCallback(() => {
+    if (!selectedElementId) return;
+    setElements((prev) => {
+      const src = prev.find((el) => el.id === selectedElementId);
+      if (!src) return prev;
+      const clone = {
+        ...src,
+        id: `el-dup-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        responsiveProps: JSON.parse(JSON.stringify(src.responsiveProps)),
+        zIndex: prev.length + 1,
+      };
+      const bp = breakpointId;
+      const current = clone.responsiveProps[bp] || clone.responsiveProps.desktop || {};
+      if (current.x) current.x = { ...current.x, value: (current.x.value ?? 0) + 20 };
+      if (current.y) current.y = { ...current.y, value: (current.y.value ?? 0) + 20 };
+      clone.responsiveProps[bp] = current;
+      setSelectedElementId(clone.id);
+      return [...prev, clone];
+    });
+  }, [selectedElementId, breakpointId]);
 
   // --- Keyboard ---
   useEffect(() => {
@@ -376,10 +450,17 @@ export default function Component({ config = {} }) {
           handleRemoveElement();
         }
       }
+      if (e.key === 'd' && (e.metaKey || e.ctrlKey) && selectedElementId && !copilotExpanded) {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+          e.preventDefault();
+          handleDuplicateElement();
+        }
+      }
     };
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [inspirationPanelOpen, addElementsOpen, copilotExpanded, handleCollapse, focusedBp, handleExitFocus, selectedElementId, handleRemoveElement]);
+  }, [inspirationPanelOpen, addElementsOpen, copilotExpanded, handleCollapse, focusedBp, handleExitFocus, selectedElementId, handleRemoveElement, handleDuplicateElement]);
 
   return (
     <div
@@ -411,12 +492,21 @@ export default function Component({ config = {} }) {
           onOpenInspiration={handleOpenInspiration}
           onToggleAddElements={handleToggleAddElements}
           addElementsOpen={addElementsOpen}
+          onToggleLayers={handleToggleLayers}
+          layersOpen={layersOpen}
         />
         <div style={{ flex: 1, position: 'relative', display: 'flex' }}>
           <AddElementsPanel
             open={addElementsOpen}
             onClose={() => setAddElementsOpen(false)}
             onAddElement={handleAddElementFromPanel}
+          />
+          <LayersPanel
+            open={layersOpen}
+            onClose={() => setLayersOpen(false)}
+            elements={elements}
+            selectedElementId={selectedElementId}
+            onSelectElement={setSelectedElementId}
           />
           <CanvasArea
             canvasHeight={canvasHeight}
@@ -426,6 +516,8 @@ export default function Component({ config = {} }) {
             onMoveElement={handleMoveElement}
             onResizeElement={handleResizeElement}
             onDropComponent={handleDropComponent}
+            onParkElement={handleParkElement}
+            onUnparkElement={handleUnparkElement}
             breakpointId={breakpointId}
             referenceWidth={referenceWidth}
             isGenerating={isGenerating}
@@ -462,6 +554,8 @@ export default function Component({ config = {} }) {
           onUpdateProp={handleUpdateProp}
           onChangeBehavior={handleChangeBehavior}
           onRemoveElement={handleRemoveElement}
+          onParkElement={handleParkElement}
+          onUnparkElement={handleUnparkElement}
         />
       </div>
 

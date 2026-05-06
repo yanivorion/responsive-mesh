@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { Sparkles, Plus, Clock, Layers, FileText, Users, LayoutGrid, List } from 'lucide-react';
 import { tokens } from './designTokens.js';
 
-export function LeftSidebar({ width, onOpenInspiration, onToggleAddElements, addElementsOpen }) {
-  const bottomIcons = [Layers, FileText, Users, LayoutGrid, List];
+export function LeftSidebar({ width, onOpenInspiration, onToggleAddElements, addElementsOpen, onToggleLayers, layersOpen }) {
+  const bottomIcons = [FileText, Users, LayoutGrid, List];
 
   return (
     <div
@@ -33,6 +33,9 @@ export function LeftSidebar({ width, onOpenInspiration, onToggleAddElements, add
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <SidebarButton width={width} onClick={onToggleLayers} title="Layers" active={layersOpen}>
+          <Layers size={20} color={layersOpen ? tokens.accent : tokens.iconDefault} strokeWidth={1.5} />
+        </SidebarButton>
         {bottomIcons.map((Icon, i) => (
           <SidebarButton key={i} width={width}>
             <Icon size={20} color={tokens.iconDefault} strokeWidth={1.5} />
