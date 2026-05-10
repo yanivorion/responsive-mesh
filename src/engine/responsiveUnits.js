@@ -152,17 +152,47 @@ export function defaultPropsFor(archetype) {
 
 export const BREAKPOINT_IDS = ['desktop', 'tablet', 'mobile'];
 
-export const BREAKPOINTS = {
+export const BASE_BREAKPOINTS = {
   desktop: { id: 'desktop', label: 'Desktop', min: 1001, defaultWidth: 1280, lucideIcon: 'Monitor' },
   tablet:  { id: 'tablet',  label: 'Tablet',  min: 751, max: 1000, defaultWidth: 768, lucideIcon: 'Tablet' },
   mobile:  { id: 'mobile',  label: 'Mobile',  min: 320, max: 750, defaultWidth: 390, lucideIcon: 'Smartphone' },
 };
 
+export const BREAKPOINTS = { ...BASE_BREAKPOINTS };
+
 /**
- * Resolve element props at the active breakpoint with desktop->tablet->mobile cascade.
+ * Create a merged breakpoint set: custom breakpoints (above desktop) + base breakpoints.
+ * Custom breakpoints are sorted widest-first.
+ * Returns { allBpMap, allBpIds } where allBpIds is sorted widest → narrowest.
+ */
+export function createBreakpointSet(customBreakpoints = []) {
+  const merged = { ...BASE_BREAKPOINTS };
+  for (const bp of customBreakpoints) {
+    merged[bp.id] = bp;
+  }
+  const allBpIds = Object.values(merged)
+    .sort((a, b) => b.defaultWidth - a.defaultWidth)
+    .map((bp) => bp.id);
+  return { allBpMap: merged, allBpIds };
+}
+
+/**
+ * Dynamic cascade: from the widest breakpoint down to the current one.
+ */
+export function getDynamicCascade(breakpointId, allBpIds) {
+  const idx = allBpIds.indexOf(breakpointId);
+  if (idx === -1) return [breakpointId];
+  return allBpIds.slice(0, idx + 1);
+}
+
+/**
+ * Resolve element props at the active breakpoint with cascade.
+ * Optionally pass allBpIds for dynamic breakpoint support.
  */
 export function resolveElementProps(element, breakpointId, ctx) {
-  const cascade = getCascade(breakpointId);
+  const cascade = ctx.allBpIds
+    ? getDynamicCascade(breakpointId, ctx.allBpIds)
+    : getCascade(breakpointId);
   const merged = {};
 
   for (const bp of cascade) {
@@ -174,9 +204,14 @@ export function resolveElementProps(element, breakpointId, ctx) {
     }
   }
 
+  const heightCtx = ctx.parentHeight
+    ? { ...ctx, parentWidth: ctx.parentHeight }
+    : ctx;
+
   const resolved = {};
   Object.keys(merged).forEach((key) => {
-    resolved[key] = resolveUnit(merged[key], ctx);
+    const isHeightProp = key === 'height' || key === 'y';
+    resolved[key] = resolveUnit(merged[key], isHeightProp ? heightCtx : ctx);
   });
   return resolved;
 }
@@ -217,6 +252,7 @@ export function createElement(componentId, componentName, x, y, w = 280, h = 200
     name: componentName,
     behavior,
     location: 'stage',
+    anchorId: null,
     props: defaultPropsFor(componentId),
     responsiveProps: {
       desktop: desktopProps,

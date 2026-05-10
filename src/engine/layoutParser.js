@@ -69,16 +69,29 @@ export function parseLayoutText(raw) {
 }
 
 /**
- * Convert a parsed V14 layout spec into editor elements.
+ * Convert a parsed V14 layout spec into editor elements grouped by sections.
+ * Returns { sections: [...], elements: [...] } where each element has a sectionId.
+ * Preserves `anchor:` references from specs by mapping spec IDs to generated IDs.
  */
 export function layoutToElements(spec, canvasWidth = 1280) {
   const refWidth = parseInt(spec.meta?.refWidth) || 1280;
   const elements = [];
+  const sections = [];
 
-  let yAccum = 0;
-
-  for (const sec of spec.sections) {
+  for (let sIdx = 0; sIdx < spec.sections.length; sIdx++) {
+    const sec = spec.sections[sIdx];
     const sectionH = sec.height || 480;
+    const sectionId = `sec-layout-${Date.now()}-${sIdx}`;
+
+    sections.push({
+      id: sectionId,
+      height: sectionH,
+      behavior: sec.behavior || 'auto',
+      label: spec.meta?.name ? `${spec.meta.name} §${sIdx + 1}` : `Section ${sIdx + 1}`,
+    });
+
+    const idMap = new Map();
+    const sectionEls = [];
 
     for (const child of (sec.children || [])) {
       const archetype = child.archetype;
@@ -92,7 +105,7 @@ export function layoutToElements(spec, canvasWidth = 1280) {
       const beh = RESPONSIVE_BEHAVIORS[behaviorKey];
 
       const cx = child.x ?? 0;
-      const cy = (child.y ?? 0) + yAccum;
+      const cy = child.y ?? 0;
       const cw = child.w === 'auto' ? (archetypeDef?.defaultSize?.w || 280) : (child.w ?? 280);
       const ch = child.h === 'auto' ? (archetypeDef?.defaultSize?.h || 200) : (child.h ?? 200);
 
@@ -113,20 +126,34 @@ export function layoutToElements(spec, canvasWidth = 1280) {
       const props = { ...defaultPropsFor(archetype), ...(child.props || {}) };
       const componentId = archetype;
 
-      elements.push({
-        id: genId(),
-        componentId,
-        archetype,
-        name: archetypeDef?.label || archetype,
-        behavior: behaviorKey,
-        props,
-        responsiveProps: { desktop: desktopProps },
-        zIndex: child.z ?? 0,
+      const elId = genId();
+      if (child.id) idMap.set(String(child.id), elId);
+
+      sectionEls.push({
+        el: {
+          id: elId,
+          componentId,
+          archetype,
+          name: archetypeDef?.label || archetype,
+          behavior: behaviorKey,
+          anchorId: null,
+          props,
+          responsiveProps: { desktop: desktopProps },
+          zIndex: child.z ?? 0,
+          sectionId,
+        },
+        specAnchor: child.anchor || null,
       });
     }
 
-    yAccum += sectionH;
+    for (const { el, specAnchor } of sectionEls) {
+      if (specAnchor) {
+        const resolvedAnchorId = idMap.get(String(specAnchor));
+        if (resolvedAnchorId) el.anchorId = resolvedAnchorId;
+      }
+      elements.push(el);
+    }
   }
 
-  return elements;
+  return { sections, elements };
 }

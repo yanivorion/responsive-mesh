@@ -1,232 +1,285 @@
 import React, { useRef, useCallback, useState, useMemo, useEffect } from 'react';
-import { Sparkles, Monitor, Tablet, Smartphone, Plus } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { PreviewRegistry } from '../previews/PreviewRegistry.jsx';
 import { resolveElementProps, BREAKPOINTS, RESPONSIVE_BEHAVIORS } from '../engine/responsiveUnits.js';
 import { tokens } from './designTokens.js';
+import { buildSnapTargets, snapPosition, snapResize } from '../engine/snapEngine.js';
+import { layoutMesh } from '../engine/meshLayout.js';
+import { GridlineOverlay } from './GridlineOverlay.jsx';
 
-const DOT_SPACING = 20;
-const DOT_RADIUS = 0.6;
-const DOT_COLOR = 'rgba(0,0,0,0.08)';
-const BP_ICONS = { desktop: Monitor, tablet: Tablet, mobile: Smartphone };
-const FRAME_GAP = 48;
 const PL_GAP = 16;
 const PL_MIN_HEIGHT = 200;
-
-function useDotPattern() {
-  return useMemo(() => ({
-    backgroundImage: `radial-gradient(circle, ${DOT_COLOR} ${DOT_RADIUS}px, transparent ${DOT_RADIUS}px)`,
-    backgroundSize: `${DOT_SPACING}px ${DOT_SPACING}px`,
-    backgroundPosition: `${DOT_SPACING / 2}px ${DOT_SPACING / 2}px`,
-  }), []);
-}
 
 export function CanvasArea({
   canvasHeight,
   elements,
+  sections,
   selectedElementId,
   onSelectElement,
   onMoveElement,
   onResizeElement,
   onDropComponent,
-  onParkElement,
   onUnparkElement,
+  onAddSection,
+  onRemoveSection,
   breakpointId,
   referenceWidth,
   isGenerating,
   uniqueId,
-  zoom,
-  onZoomChange,
   onOpenInspiration,
-  focusedBp,
-  activeBreakpoints,
-  onFocus,
-  onExitFocus,
-  onAddBreakpoint,
+  previewMode,
+  meshMode = true,
+  showGridlines = false,
+  isHighestBreakpoint = true,
   children,
 }) {
-  const containerRef = useRef(null);
-  const [isPanning, setIsPanning] = useState(false);
-  const panRef = useRef({ active: false, startX: 0, startY: 0, panXStart: 0, panYStart: 0 });
-  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const dotPattern = useDotPattern();
-  const scale = zoom / 100;
+  const bp = BREAKPOINTS[breakpointId] || BREAKPOINTS.desktop;
+  const frameWidth = bp.defaultWidth;
+  const canvasRef = useRef(null);
+  const [dragOver, setDragOver] = useState(false);
 
-  // Reset pan when switching between overview/focus
-  useEffect(() => {
-    setPanOffset({ x: 0, y: 0 });
-  }, [focusedBp]);
+  const ctx = useMemo(() => ({
+    canvasWidth: frameWidth, parentWidth: frameWidth, referenceWidth,
+  }), [frameWidth, referenceWidth]);
 
-  // --- Wheel: Cmd/Ctrl = zoom, plain = pan (Figma-style) ---
-  const handleWheel = useCallback((e) => {
-    e.preventDefault();
-    if (e.ctrlKey || e.metaKey) {
-      const raw = -e.deltaY;
-      const delta = Math.sign(raw) * Math.min(Math.abs(raw) * 0.3, 4);
-      onZoomChange(Math.max(15, Math.min(200, zoom + delta)));
-    } else {
-      setPanOffset((prev) => ({
-        x: prev.x - e.deltaX,
-        y: prev.y - e.deltaY,
-      }));
-    }
-  }, [zoom, onZoomChange]);
+  const [snapGuides, setSnapGuides] = useState({ x: null, y: null });
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    el.addEventListener('wheel', handleWheel, { passive: false });
-    return () => el.removeEventListener('wheel', handleWheel);
-  }, [handleWheel]);
+  const stageElements = elements.filter((el) => el.location !== 'parkingLot');
+  const hasParkedLeft = elements.some((el) => el.location === 'parkingLot' && (el.parkingSide || 'left') === 'left');
+  const hasParkedRight = elements.some((el) => el.location === 'parkingLot' && (el.parkingSide || 'left') === 'right');
+  const hasStageElements = stageElements.length > 0 || isGenerating;
 
-  // --- Pan: spacebar + drag (secondary method) ---
-  useEffect(() => {
-    const down = (e) => {
-      if (e.code === 'Space' && !e.repeat && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
-        e.preventDefault();
-        setIsPanning(true);
-      }
+  const resolvedElements = useMemo(() => stageElements.map((el) => {
+    const r = resolveElementProps(el, breakpointId, ctx);
+    return {
+      ...el,
+      _resolvedX: r.x === 'auto' ? 0 : r.x,
+      _resolvedY: r.y === 'auto' ? 0 : r.y,
+      _resolvedW: r.width === 'auto' ? 280 : r.width,
+      _resolvedH: r.height === 'auto' ? 200 : r.height,
     };
-    const up = (e) => { if (e.code === 'Space') { setIsPanning(false); panRef.current.active = false; } };
-    window.addEventListener('keydown', down);
-    window.addEventListener('keyup', up);
-    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
-  }, []);
+  }), [stageElements, breakpointId, ctx]);
 
-  const handlePanMouseDown = useCallback((e) => {
-    if (!isPanning) return;
+  const clearGuides = useCallback(() => setSnapGuides({ x: null, y: null }), []);
+
+  // --- Drop from Add Elements panel ---
+  const handleDragOver = useCallback((e) => {
     e.preventDefault();
-    panRef.current = { active: true, startX: e.clientX, startY: e.clientY, panXStart: panOffset.x, panYStart: panOffset.y };
-  }, [isPanning, panOffset]);
-  const handlePanMouseMove = useCallback((e) => {
-    if (!panRef.current.active) return;
-    setPanOffset({
-      x: panRef.current.panXStart + (e.clientX - panRef.current.startX),
-      y: panRef.current.panYStart + (e.clientY - panRef.current.startY),
-    });
+    e.dataTransfer.dropEffect = 'copy';
+    setDragOver(true);
   }, []);
-  const handlePanMouseUp = useCallback(() => { panRef.current.active = false; }, []);
+  const handleDragLeave = useCallback(() => setDragOver(false), []);
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const data = e.dataTransfer.getData('application/json');
+    if (!data) return;
+    try {
+      const parsed = JSON.parse(data);
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      let dropSectionId = sections?.[0]?.id;
+      if (sections && sections.length > 0) {
+        let yAcc = 0;
+        for (const sec of sections) {
+          const secH = sec.height || 200;
+          if (y >= yAcc && y < yAcc + secH + 30) {
+            dropSectionId = sec.id;
+            break;
+          }
+          yAcc += secH + 30;
+        }
+      }
+      onDropComponent(parsed.componentId, parsed.componentName, x, y, parsed.defaultW, parsed.defaultH, dropSectionId);
+    } catch (_) {}
+  }, [onDropComponent, sections]);
 
-  // Click outside frame in focus mode => exit
-  const handleScrollAreaClick = useCallback((e) => {
-    if (focusedBp && e.target === e.currentTarget) {
-      onExitFocus();
+  const handleCanvasClick = useCallback((e) => {
+    if (e.target === e.currentTarget || e.target.dataset?.canvasBg) {
+      onSelectElement(null);
     }
-  }, [focusedBp, onExitFocus]);
+  }, [onSelectElement]);
 
-  const hasElements = elements.length > 0;
-  const showTabletAdd = !activeBreakpoints.includes('tablet');
+  // Elements are only parked via explicit actions (Inspector buttons).
+  // Dragging near the edge just moves the element — no auto-park.
 
   return (
     <div style={styles.root}>
-      <div
-        ref={containerRef}
-        style={{
-          ...styles.canvasViewport,
-          ...dotPattern,
-          cursor: isPanning ? (panRef.current.active ? 'grabbing' : 'grab') : 'default',
-        }}
-        onMouseDown={handlePanMouseDown}
-        onMouseMove={handlePanMouseMove}
-        onMouseUp={handlePanMouseUp}
-        onMouseLeave={handlePanMouseUp}
-        onClick={handleScrollAreaClick}
-      >
-        <div
-          style={{
-            transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${scale})`,
-            transformOrigin: 'top center',
-            transition: panRef.current.active ? 'none' : `transform 200ms ${tokens.easeOut}`,
-            display: 'flex',
-            gap: FRAME_GAP,
-            alignItems: 'flex-start',
-            padding: '24px 60px 60px',
-            willChange: 'transform',
-          }}
-        >
-          {focusedBp ? (
-            // ──────── FOCUS MODE ────────
-            <FocusedFrame
-              bpId={focusedBp}
-              canvasHeight={canvasHeight}
+      <div style={{
+        ...styles.scrollArea,
+        ...(previewMode ? { background: '#FFFFFF', padding: 0, justifyContent: 'center' } : {}),
+      }}>
+        <div style={styles.stageRow}>
+
+          {/* Left Parking Lot — only on highest breakpoint */}
+          {!previewMode && isHighestBreakpoint && hasParkedLeft && (
+            <ParkingLotZone
+              side="left"
               elements={elements}
               selectedElementId={selectedElementId}
               onSelectElement={onSelectElement}
               onMoveElement={onMoveElement}
               onResizeElement={onResizeElement}
-              onDropComponent={onDropComponent}
-              onParkElement={onParkElement}
               onUnparkElement={onUnparkElement}
-              referenceWidth={referenceWidth}
-              scale={scale}
-              isPanning={isPanning}
-              isGenerating={isGenerating}
-              uniqueId={uniqueId}
-              onOpenInspiration={onOpenInspiration}
-              hasElements={hasElements}
+              breakpointId={breakpointId}
+              ctx={ctx}
+              frameHeight={canvasHeight}
             />
-          ) : (
-            // ──────── OVERVIEW MODE ────────
-            <>
-              {activeBreakpoints.map((bpId, idx) => {
-                const bp = BREAKPOINTS[bpId];
-                const Icon = BP_ICONS[bpId];
-                const w = bp.defaultWidth;
+          )}
 
+          {/* Main Canvas */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            {!previewMode && (
+              <div style={styles.bpLabel}>
+                {bp.label}
+                <span style={{ fontWeight: 400, opacity: 0.6, marginLeft: 6 }}>{frameWidth}px</span>
+              </div>
+            )}
+
+            <div
+              ref={canvasRef}
+              style={{
+                ...styles.canvas,
+                width: frameWidth,
+                minHeight: canvasHeight,
+                outline: !previewMode && dragOver ? `2px dashed ${tokens.accent}` : 'none',
+                outlineOffset: -2,
+                boxShadow: previewMode ? 'none' : styles.canvas.boxShadow,
+                borderRadius: previewMode ? 0 : styles.canvas.borderRadius,
+              }}
+              onDragOver={previewMode ? undefined : handleDragOver}
+              onDragLeave={previewMode ? undefined : handleDragLeave}
+              onDrop={previewMode ? undefined : handleDrop}
+              onClick={previewMode ? undefined : handleCanvasClick}
+            >
+              {!hasStageElements && !previewMode && (
+                <EmptyState onOpenInspiration={onOpenInspiration} />
+              )}
+              {isGenerating && <LoadingState uniqueId={uniqueId} />}
+
+              {/* Render sections */}
+              {(sections && sections.length > 0) ? sections.map((sec, secIdx) => {
+                const sectionEls = stageElements.filter((el) => el.sectionId === sec.id);
+                const secHeight = sec.height || 200;
+                const sectionCtx = { ...ctx, parentHeight: secHeight };
+                const meshPositions = meshMode
+                  ? layoutMesh(sectionEls, breakpointId, sectionCtx, true)
+                  : null;
+                const meshMap = meshPositions
+                  ? new Map(meshPositions.map(p => [p.id, p]))
+                  : null;
                 return (
-                  <React.Fragment key={bpId}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
-                      <div style={styles.overviewLabel}>
-                        <Icon size={12} strokeWidth={2} color={tokens.text3} />
-                        <span>{bp.label}</span>
-                        <span style={{ fontWeight: 400, opacity: 0.6 }}>{w}px</span>
-                      </div>
-
-                      <div
-                        onDoubleClick={() => onFocus(bpId)}
-                        style={{ ...styles.overviewFrame, width: w, height: canvasHeight, cursor: 'pointer' }}
-                      >
-                        <div style={styles.canvasBody}>
-                          {!hasElements && !isGenerating && bpId === 'desktop' && (
-                            <EmptyState onOpenInspiration={onOpenInspiration} />
-                          )}
-                          {!hasElements && !isGenerating && bpId !== 'desktop' && (
-                            <div style={styles.emptyMirror} data-canvas-bg="true">
-                              <span style={{ fontSize: 12, color: tokens.text3 }}>
-                                Double-click to edit
-                              </span>
-                            </div>
-                          )}
-                          {elements.filter((el) => el.location !== 'parkingLot').map((el) => (
-                            <StageElement
-                              key={el.id}
-                              element={el}
-                              isSelected={false}
-                              breakpointId={bpId}
-                              ctx={{ canvasWidth: w, parentWidth: w, referenceWidth }}
-                              scale={scale}
-                              isPanning={false}
-                              isActive={false}
-                              frameWidth={w}
-                              frameHeight={canvasHeight}
-                            />
-                          ))}
-                        </div>
-                      </div>
+                  <React.Fragment key={sec.id}>
+                    <div style={{
+                      position: 'relative',
+                      width: '100%',
+                      minHeight: secHeight,
+                      borderBottom: previewMode ? 'none' : `1px dashed ${tokens.controlBorder}`,
+                    }}>
+                      {!previewMode && (
+                        <div style={styles.sectionLabel}>{sec.label || `Section ${secIdx + 1}`}</div>
+                      )}
+                      {sectionEls.map((el) => (
+                        <StageElement
+                          key={el.id}
+                          element={el}
+                          isSelected={!previewMode && selectedElementId === el.id}
+                          onSelect={previewMode ? undefined : () => onSelectElement(el.id)}
+                          onMove={previewMode ? undefined : (dx, dy) => onMoveElement(el.id, dx, dy)}
+                          onResize={previewMode ? undefined : (dw, dh, dx, dy) => onResizeElement(el.id, dw, dh, dx, dy)}
+                          breakpointId={breakpointId}
+                          ctx={sectionCtx}
+                          frameWidth={frameWidth}
+                          frameHeight={secHeight}
+                          previewMode={previewMode}
+                          resolvedElements={resolvedElements}
+                          onSnapGuides={setSnapGuides}
+                          onClearGuides={clearGuides}
+                          meshOverride={meshMap ? meshMap.get(el.id) : null}
+                        />
+                      ))}
+                      {!previewMode && showGridlines && meshMode && meshPositions && meshPositions.length > 0 && (
+                        <GridlineOverlay
+                          positions={meshPositions}
+                          sectionHeight={secHeight}
+                          sectionWidth={frameWidth}
+                          elements={sectionEls}
+                        />
+                      )}
+                      {!previewMode && sectionEls.length === 0 && (
+                        <div style={styles.sectionEmpty}>Drop elements here</div>
+                      )}
                     </div>
-
-                    {/* Add Breakpoint button between desktop and mobile */}
-                    {showTabletAdd && bpId === 'desktop' && idx < activeBreakpoints.length - 1 && (
-                      <div style={styles.addBpWrap}>
-                        <button onClick={onAddBreakpoint} style={styles.addBpBtn}>
-                          <Plus size={14} strokeWidth={2} />
-                          <span>Tablet</span>
-                        </button>
-                      </div>
+                    {!previewMode && onAddSection && (
+                      <button
+                        onClick={() => onAddSection(sec.id)}
+                        style={styles.addSectionBtn}
+                      >
+                        + Add Section
+                      </button>
                     )}
                   </React.Fragment>
                 );
-              })}
-            </>
+              }) : (
+                /* Fallback: flat rendering for elements without sections */
+                stageElements.map((el) => (
+                  <StageElement
+                    key={el.id}
+                    element={el}
+                    isSelected={!previewMode && selectedElementId === el.id}
+                    onSelect={previewMode ? undefined : () => onSelectElement(el.id)}
+                    onMove={previewMode ? undefined : (dx, dy) => onMoveElement(el.id, dx, dy)}
+                    onResize={previewMode ? undefined : (dw, dh, dx, dy) => onResizeElement(el.id, dw, dh, dx, dy)}
+                    breakpointId={breakpointId}
+                    ctx={ctx}
+                    frameWidth={frameWidth}
+                    frameHeight={canvasHeight}
+                    previewMode={previewMode}
+                    resolvedElements={resolvedElements}
+                    onSnapGuides={setSnapGuides}
+                    onClearGuides={clearGuides}
+                  />
+                ))
+              )}
+
+              {/* Snap Guide Lines */}
+              {snapGuides.x !== null && (
+                <div style={{
+                  position: 'absolute', left: snapGuides.x, top: 0,
+                  width: 1, height: '100%',
+                  backgroundColor: tokens.accent,
+                  pointerEvents: 'none', zIndex: 9998,
+                  opacity: 0.7,
+                }} />
+              )}
+              {snapGuides.y !== null && (
+                <div style={{
+                  position: 'absolute', top: snapGuides.y, left: 0,
+                  height: 1, width: '100%',
+                  backgroundColor: tokens.accent,
+                  pointerEvents: 'none', zIndex: 9998,
+                  opacity: 0.7,
+                }} />
+              )}
+            </div>
+          </div>
+
+          {/* Right Parking Lot — only on highest breakpoint */}
+          {!previewMode && isHighestBreakpoint && hasParkedRight && (
+            <ParkingLotZone
+              side="right"
+              elements={elements}
+              selectedElementId={selectedElementId}
+              onSelectElement={onSelectElement}
+              onMoveElement={onMoveElement}
+              onResizeElement={onResizeElement}
+              onUnparkElement={onUnparkElement}
+              breakpointId={breakpointId}
+              ctx={ctx}
+              frameHeight={canvasHeight}
+            />
           )}
         </div>
       </div>
@@ -242,7 +295,7 @@ export function CanvasArea({
 function ParkingLotZone({
   side, elements, selectedElementId, onSelectElement,
   onMoveElement, onResizeElement, onUnparkElement,
-  breakpointId, ctx, scale, isPanning, frameHeight,
+  breakpointId, ctx, frameHeight,
 }) {
   const parkedElements = elements.filter((el) => el.location === 'parkingLot');
   const sideElements = parkedElements.filter((el) => (el.parkingSide || 'left') === side);
@@ -281,9 +334,6 @@ function ParkingLotZone({
           onResize={(dw, dh, dx, dy) => onResizeElement(el.id, dw, dh, dx, dy)}
           breakpointId={breakpointId}
           ctx={ctx}
-          scale={scale}
-          isPanning={isPanning}
-          isActive={true}
           frameWidth={plWidth}
           frameHeight={plHeight}
           isInParkingLot={true}
@@ -295,302 +345,95 @@ function ParkingLotZone({
 }
 
 // ═══════════════════════════════════════════
-// FOCUSED FRAME (with edge handles + parking lot)
-// ═══════════════════════════════════════════
-function FocusedFrame({
-  bpId, canvasHeight, elements, selectedElementId,
-  onSelectElement, onMoveElement, onResizeElement, onDropComponent,
-  onParkElement, onUnparkElement,
-  referenceWidth, scale, isPanning, isGenerating, uniqueId, onOpenInspiration, hasElements,
-}) {
-  const bp = BREAKPOINTS[bpId];
-  const Icon = BP_ICONS[bpId];
-  const defaultWidth = bp.defaultWidth;
-  const canvasRef = useRef(null);
-  const [dragOver, setDragOver] = useState(false);
-  const [dragWidth, setDragWidth] = useState(null);
-  const [springing, setSpringing] = useState(false);
-
-  const frameWidth = dragWidth !== null ? dragWidth : defaultWidth;
-  const ctx = useMemo(() => ({
-    canvasWidth: frameWidth, parentWidth: frameWidth, referenceWidth,
-  }), [frameWidth, referenceWidth]);
-
-  const stageElements = elements.filter((el) => el.location !== 'parkingLot');
-  const hasParkedLeft = elements.some((el) => el.location === 'parkingLot' && (el.parkingSide || 'left') === 'left');
-  const hasParkedRight = elements.some((el) => el.location === 'parkingLot' && (el.parkingSide || 'left') === 'right');
-  const stageHasElements = stageElements.length > 0 || isGenerating;
-
-  // --- Drop ---
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-    setDragOver(true);
-  }, []);
-  const handleDragLeave = useCallback(() => setDragOver(false), []);
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    setDragOver(false);
-    const data = e.dataTransfer.getData('application/json');
-    if (!data) return;
-    try {
-      const parsed = JSON.parse(data);
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const x = (e.clientX - rect.left) / scale;
-      const y = (e.clientY - rect.top) / scale;
-      onDropComponent(parsed.componentId, parsed.componentName, x, y, parsed.defaultW, parsed.defaultH);
-    } catch (_) {}
-  }, [onDropComponent, scale]);
-
-  const handleCanvasClick = useCallback((e) => {
-    if (e.target === e.currentTarget || e.target.dataset?.canvasBg) {
-      onSelectElement(null);
-    }
-  }, [onSelectElement]);
-
-  // --- Edge handle drag ---
-  const handleEdgeDrag = useCallback((e, side) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const startWidth = frameWidth;
-
-    const onMove = (ev) => {
-      const dx = (ev.clientX - startX) / scale;
-      const delta = side === 'right' ? dx * 2 : -dx * 2;
-      setDragWidth(Math.max(280, Math.min(1600, startWidth + delta)));
-    };
-
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      setSpringing(true);
-      setDragWidth(defaultWidth);
-      setTimeout(() => {
-        setSpringing(false);
-        setDragWidth(null);
-      }, 350);
-    };
-
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [frameWidth, defaultWidth, scale]);
-
-  // Detect when a stage element is dragged past the frame boundary and auto-park it
-  const handleMoveWithBoundary = useCallback((elId, dx, dy) => {
-    const el = elements.find((e) => e.id === elId);
-    if (!el) return;
-    if (el.location === 'parkingLot') {
-      onMoveElement(elId, dx, dy);
-      return;
-    }
-    const r = resolveElementProps(el, bpId, ctx);
-    const newX = (r.x === 'auto' ? 0 : r.x) + dx;
-    const newY = (r.y === 'auto' ? 0 : r.y) + dy;
-    const elW = r.width === 'auto' ? 280 : r.width;
-    const elH = r.height === 'auto' ? 200 : r.height;
-    const outsideRatio = computeOutsideRatio(newX, newY, elW, elH, frameWidth, canvasHeight);
-
-    if (outsideRatio > 0.6 && onParkElement) {
-      const side = (newX + elW / 2) < frameWidth / 2 ? 'left' : 'right';
-      const plX = Math.max(16, Math.min(frameWidth - elW - 16, newX < 0 ? Math.abs(newX) : newX - frameWidth));
-      const plY = Math.max(32, newY < 0 ? 16 : newY);
-      onParkElement(elId, side, plX, plY);
-    } else {
-      onMoveElement(elId, dx, dy);
-    }
-  }, [elements, bpId, ctx, frameWidth, canvasHeight, onMoveElement, onParkElement]);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0, alignItems: 'center' }}>
-      <div style={styles.focusLabel}>
-        <Icon size={12} strokeWidth={2} />
-        {bp.label}
-        <span style={{ fontWeight: 400, opacity: 0.7 }}>{Math.round(frameWidth)}px</span>
-      </div>
-
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', gap: PL_GAP }}>
-        {/* Left Parking Lot */}
-        {hasParkedLeft && (
-          <ParkingLotZone
-            side="left"
-            elements={elements}
-            selectedElementId={selectedElementId}
-            onSelectElement={onSelectElement}
-            onMoveElement={onMoveElement}
-            onResizeElement={onResizeElement}
-            onUnparkElement={onUnparkElement}
-            breakpointId={bpId}
-            ctx={ctx}
-            scale={scale}
-            isPanning={isPanning}
-            frameHeight={canvasHeight}
-          />
-        )}
-
-        <div style={{ display: 'flex', alignItems: 'stretch' }}>
-          {/* Left edge handle */}
-          <div
-            onMouseDown={(e) => handleEdgeDrag(e, 'left')}
-            style={styles.edgeHandle}
-          >
-            <div style={styles.edgeHandleBar} />
-          </div>
-
-          {/* Frame */}
-          <div style={{
-            ...styles.focusFrame,
-            width: frameWidth,
-            height: canvasHeight,
-            transition: springing ? `width 350ms ${tokens.easeOut}` : 'none',
-          }}>
-            <div
-              ref={canvasRef}
-              style={{
-                ...styles.canvasBody,
-                outline: dragOver ? `2px dashed ${tokens.accent}` : 'none',
-                outlineOffset: -2,
-              }}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={isPanning ? undefined : handleCanvasClick}
-            >
-              {!stageHasElements && !isGenerating && (
-                <EmptyState onOpenInspiration={onOpenInspiration} />
-              )}
-              {isGenerating && <LoadingState uniqueId={uniqueId} />}
-              {stageElements.map((el) => {
-                const r = resolveElementProps(el, bpId, ctx);
-                const eX = r.x === 'auto' ? 0 : r.x;
-                const eY = r.y === 'auto' ? 0 : r.y;
-                const eW = r.width === 'auto' ? 280 : r.width;
-                const eH = r.height === 'auto' ? 200 : r.height;
-                return (
-                  <StageElement
-                    key={el.id}
-                    element={el}
-                    isSelected={selectedElementId === el.id}
-                    onSelect={() => onSelectElement(el.id)}
-                    onMove={(dx, dy) => handleMoveWithBoundary(el.id, dx, dy)}
-                    onResize={(dw, dh, dx, dy) => onResizeElement(el.id, dw, dh, dx, dy)}
-                    breakpointId={bpId}
-                    ctx={ctx}
-                    scale={scale}
-                    isPanning={isPanning}
-                    isActive={true}
-                    frameWidth={frameWidth}
-                    frameHeight={canvasHeight}
-                  />
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Right edge handle */}
-          <div
-            onMouseDown={(e) => handleEdgeDrag(e, 'right')}
-            style={styles.edgeHandle}
-          >
-            <div style={styles.edgeHandleBar} />
-          </div>
-        </div>
-
-        {/* Right Parking Lot */}
-        {hasParkedRight && (
-          <ParkingLotZone
-            side="right"
-            elements={elements}
-            selectedElementId={selectedElementId}
-            onSelectElement={onSelectElement}
-            onMoveElement={onMoveElement}
-            onResizeElement={onResizeElement}
-            onUnparkElement={onUnparkElement}
-            breakpointId={bpId}
-            ctx={ctx}
-            scale={scale}
-            isPanning={isPanning}
-            frameHeight={canvasHeight}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════
 // STAGE ELEMENT
 // ═══════════════════════════════════════════
-function computeOutsideRatio(elX, elY, elW, elH, frameW, frameH) {
-  if (elW <= 0 || elH <= 0) return 0;
-  const overlapL = Math.max(0, elX);
-  const overlapT = Math.max(0, elY);
-  const overlapR = Math.min(frameW, elX + elW);
-  const overlapB = Math.min(frameH, elY + elH);
-  const overlapW = Math.max(0, overlapR - overlapL);
-  const overlapH = Math.max(0, overlapB - overlapT);
-  const overlapArea = overlapW * overlapH;
-  const totalArea = elW * elH;
-  return 1 - (overlapArea / totalArea);
-}
-
-const HATCH_SVG = `url("data:image/svg+xml,%3Csvg width='8' height='8' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M-2 2L2-2M0 8L8 0M6 10L10 6' stroke='%23${tokens.accent.replace('#', '')}' stroke-width='1' opacity='0.25'/%3E%3C/svg%3E")`;
-
-function StageElement({ element, isSelected, onSelect, onMove, onResize, breakpointId, ctx, scale, isPanning, isActive, frameWidth, frameHeight, isInParkingLot, onUnpark }) {
+function StageElement({ element, isSelected, onSelect, onMove, onResize, breakpointId, ctx, frameWidth, frameHeight, isInParkingLot, onUnpark, previewMode, resolvedElements, onSnapGuides, onClearGuides, meshOverride }) {
   const resolved = resolveElementProps(element, breakpointId, ctx);
   const dragRef = useRef(null);
+  const contentRef = useRef(null);
   const [interacting, setInteracting] = useState(false);
+  const [renderedHeight, setRenderedHeight] = useState(null);
 
-  const x = resolved.x === 'auto' ? 0 : resolved.x;
-  const y = resolved.y === 'auto' ? 0 : resolved.y;
-  const w = resolved.width === 'auto' ? 280 : resolved.width;
-  const h = resolved.height === 'auto' ? 200 : resolved.height;
+  const rawX = resolved.x === 'auto' ? 0 : resolved.x;
+  const rawY = resolved.y === 'auto' ? 0 : resolved.y;
+  const rawW = resolved.width === 'auto' ? 280 : resolved.width;
+  const rawH = resolved.height === 'auto' ? 200 : resolved.height;
+
+  const x = meshOverride ? meshOverride.x : rawX;
+  const y = meshOverride ? meshOverride.y : rawY;
+  const w = meshOverride ? meshOverride.w : rawW;
+  const h = meshOverride ? meshOverride.h : rawH;
 
   const isParked = isInParkingLot || element.location === 'parkingLot';
 
   const beh = element.behavior && RESPONSIVE_BEHAVIORS[element.behavior];
   const isWrap = element.behavior === 'wrap';
-  const isHug = element.behavior === 'hug';
-  const autoHeight = beh && beh.heightUnit === 'auto';
+  const isTextElement = ['title', 'paragraph', 'text'].includes(element.componentId);
+  const autoHeight = (beh && beh.heightUnit === 'auto') || isTextElement;
   const fontScale = (!isWrap && beh && (beh.widthUnit === 'spx' || beh.heightUnit === 'spx') && ctx.referenceWidth)
     ? ctx.canvasWidth / ctx.referenceWidth
     : 1;
 
-  const geomRef = useRef({ x, y, w, h });
-  geomRef.current = { x, y, w, h };
+  useEffect(() => {
+    if (!autoHeight || !contentRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setRenderedHeight(entry.contentRect.height);
+      }
+    });
+    ro.observe(contentRef.current);
+    return () => ro.disconnect();
+  }, [autoHeight]);
+
+  const actualH = autoHeight && renderedHeight ? renderedHeight : h;
+  const geomRef = useRef({ x, y, w, h: actualH });
+  geomRef.current = { x, y, w, h: actualH };
 
   const handleMouseDown = useCallback((e) => {
-    if (!isActive || isPanning || !onMove) return;
+    if (!onMove) return;
     if (e.target.closest?.('[data-resize-handle]')) return;
     e.stopPropagation();
     if (onSelect) onSelect();
     const startX = e.clientX;
     const startY = e.clientY;
     let moved = false;
+    let snapDx = 0, snapDy = 0;
     setInteracting(true);
-    const { x: ox, y: oy } = geomRef.current;
+    const { x: ox, y: oy, w: ow, h: oh } = geomRef.current;
+    const targets = resolvedElements ? buildSnapTargets(frameWidth, frameHeight, resolvedElements, element.id) : null;
     const move = (ev) => {
       moved = true;
-      const dx = (ev.clientX - startX) / scale;
-      const dy = (ev.clientY - startY) / scale;
-      if (dragRef.current) dragRef.current.style.transform = `translate(${ox + dx}px, ${oy + dy}px)`;
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      const proposedX = ox + dx;
+      const proposedY = oy + dy;
+      if (targets && onSnapGuides) {
+        const snap = snapPosition(proposedX, proposedY, ow, oh, targets);
+        snapDx = snap.x - proposedX;
+        snapDy = snap.y - proposedY;
+        onSnapGuides(snap.guides);
+        if (dragRef.current) dragRef.current.style.transform = `translate(${snap.x}px, ${snap.y}px)`;
+      } else {
+        snapDx = 0; snapDy = 0;
+        if (dragRef.current) dragRef.current.style.transform = `translate(${proposedX}px, ${proposedY}px)`;
+      }
     };
     const up = (ev) => {
       setInteracting(false);
       document.removeEventListener('mousemove', move);
       document.removeEventListener('mouseup', up);
+      if (onClearGuides) onClearGuides();
       if (!moved) return;
-      const dx = (ev.clientX - startX) / scale;
-      const dy = (ev.clientY - startY) / scale;
+      const dx = ev.clientX - startX + snapDx;
+      const dy = ev.clientY - startY + snapDy;
       if (Math.abs(dx) > 1 || Math.abs(dy) > 1) onMove(dx, dy);
     };
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up);
-  }, [onSelect, onMove, scale, isPanning, isActive]);
+  }, [onSelect, onMove, resolvedElements, frameWidth, frameHeight, element.id, onSnapGuides, onClearGuides]);
 
   const makeResizeHandler = useCallback((edges) => (e) => {
-    if (!isActive || isPanning || !onResize) return;
+    if (!onResize) return;
     e.stopPropagation();
     e.preventDefault();
     if (onSelect) onSelect();
@@ -599,25 +442,37 @@ function StageElement({ element, isSelected, onSelect, onMove, onResize, breakpo
     const { left, right, top, bottom } = edges;
     const { x: ox, y: oy, w: ow, h: oh } = geomRef.current;
     setInteracting(true);
+    const targets = resolvedElements ? buildSnapTargets(frameWidth, frameHeight, resolvedElements, element.id) : null;
+
+    const handle = `${top ? 'n' : ''}${bottom ? 's' : ''}${left ? 'w' : ''}${right ? 'e' : ''}`;
+    let lastSnap = null;
+
     const calc = (ev) => {
-      const rawDx = (ev.clientX - startMX) / scale;
-      const rawDy = (ev.clientY - startMY) / scale;
+      const rawDx = ev.clientX - startMX;
+      const rawDy = ev.clientY - startMY;
       let dw = 0, dh = 0;
       if (right) dw = rawDx;
       if (left) dw = -rawDx;
       if (bottom) dh = rawDy;
       if (top) dh = -rawDy;
-      const newW = Math.max(60, ow + dw);
-      const newH = Math.max(40, oh + dh);
-      const posX = left ? ox + (ow - newW) : ox;
-      const posY = top ? oy + (oh - newH) : oy;
+      let newW = Math.max(60, ow + dw);
+      let newH = Math.max(40, oh + dh);
+      let posX = left ? ox + (ow - newW) : ox;
+      let posY = top ? oy + (oh - newH) : oy;
+
+      if (targets && onSnapGuides) {
+        const snap = snapResize(handle, posX, posY, newW, newH, targets);
+        lastSnap = snap;
+        onSnapGuides(snap.guides);
+        return { newW: snap.w, newH: snap.h, posX: snap.x, posY: snap.y };
+      }
       return { newW, newH, posX, posY };
     };
     const move = (ev) => {
       const { newW, newH, posX, posY } = calc(ev);
       if (dragRef.current) {
         dragRef.current.style.width = `${newW}px`;
-        dragRef.current.style.height = `${newH}px`;
+        if (!autoHeight) dragRef.current.style.height = `${newH}px`;
         dragRef.current.style.transform = `translate(${posX}px, ${posY}px)`;
       }
     };
@@ -625,12 +480,13 @@ function StageElement({ element, isSelected, onSelect, onMove, onResize, breakpo
       setInteracting(false);
       document.removeEventListener('mousemove', move);
       document.removeEventListener('mouseup', up);
+      if (onClearGuides) onClearGuides();
       const { newW, newH, posX, posY } = calc(ev);
-      onResize(newW - ow, newH - oh, posX - ox, posY - oy);
+      onResize(newW - ow, autoHeight ? 0 : newH - oh, posX - ox, autoHeight ? 0 : posY - oy);
     };
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up);
-  }, [onSelect, onResize, scale, isPanning, isActive]);
+  }, [onSelect, onResize, resolvedElements, frameWidth, frameHeight, element.id, onSnapGuides, onClearGuides, autoHeight]);
 
   return (
     <div
@@ -642,19 +498,18 @@ function StageElement({ element, isSelected, onSelect, onMove, onResize, breakpo
         transform: `translate(${x}px, ${y}px)`,
         width: w,
         height: autoHeight ? 'auto' : h,
-        minHeight: autoHeight ? Math.min(h, 40) : undefined,
         zIndex: isSelected ? 999 : (element.zIndex || 1),
-        cursor: !isActive ? 'default' : isPanning ? 'inherit' : (interacting ? 'grabbing' : 'grab'),
-        boxShadow: isSelected ? `0 0 0 2px ${tokens.accent}, ${tokens.shadowRest}` : tokens.shadowSubtle,
-        borderRadius: tokens.radiusSm,
+        cursor: previewMode ? 'default' : interacting ? 'grabbing' : 'grab',
+        boxShadow: previewMode ? 'none' : isSelected ? `0 0 0 2px ${tokens.accent}, ${tokens.shadowRest}` : isTextElement ? 'none' : tokens.shadowSubtle,
+        borderRadius: previewMode ? 0 : tokens.radiusSm,
         overflow: 'visible',
-        backgroundColor: '#FFFFFF',
+        backgroundColor: previewMode || isTextElement ? 'transparent' : '#FFFFFF',
         transition: interacting ? 'none' : `box-shadow ${tokens.durMedium} ${tokens.easeOut}`,
         userSelect: 'none',
-        pointerEvents: isActive ? 'auto' : 'none',
+        pointerEvents: previewMode ? 'none' : 'auto',
       }}
     >
-      <div style={{ pointerEvents: 'none', width: '100%', height: autoHeight ? 'auto' : '100%', overflow: autoHeight ? 'visible' : 'hidden', borderRadius: tokens.radiusSm }}>
+      <div ref={contentRef} style={{ pointerEvents: 'none', width: '100%', height: autoHeight ? 'auto' : '100%', overflow: autoHeight ? 'visible' : 'hidden', borderRadius: tokens.radiusSm }}>
         <PreviewRegistry
           id={element.componentId}
           width={Math.round(w)}
@@ -664,10 +519,10 @@ function StageElement({ element, isSelected, onSelect, onMove, onResize, breakpo
           fontScale={fontScale}
         />
       </div>
-      <div style={{
+      {!previewMode && <div style={{
         ...styles.nameTag,
         backgroundColor: isParked ? `${tokens.text3}dd` : `${tokens.accent}dd`,
-      }}>{element.name}</div>
+      }}>{element.name}</div>}
       {isSelected && isParked && onUnpark && (
         <button
           onClick={(e) => { e.stopPropagation(); onUnpark(); }}
@@ -682,14 +537,12 @@ function StageElement({ element, isSelected, onSelect, onMove, onResize, breakpo
             {formatProp(element, breakpointId, 'x')} , {formatProp(element, breakpointId, 'y')}
           </div>
           <div style={styles.unitBadgeSize}>
-            {formatProp(element, breakpointId, 'width')} x {formatProp(element, breakpointId, 'height')}
+            {formatProp(element, breakpointId, 'width')} x {autoHeight && renderedHeight ? `${Math.round(renderedHeight)}px` : formatProp(element, breakpointId, 'height')}
           </div>
-          {/* Corner squares — resize both axes */}
           <div data-resize-handle="true" onMouseDown={makeResizeHandler({ right: true, bottom: true })} style={styles.cornerSE} />
           <div data-resize-handle="true" onMouseDown={makeResizeHandler({ right: true, top: true })} style={styles.cornerNE} />
           <div data-resize-handle="true" onMouseDown={makeResizeHandler({ left: true, bottom: true })} style={styles.cornerSW} />
           <div data-resize-handle="true" onMouseDown={makeResizeHandler({ left: true, top: true })} style={styles.cornerNW} />
-          {/* Edge-mid circles — single axis */}
           <div data-resize-handle="true" onMouseDown={makeResizeHandler({ top: true })} style={styles.edgeMidTop} />
           <div data-resize-handle="true" onMouseDown={makeResizeHandler({ bottom: true })} style={styles.edgeMidBottom} />
           <div data-resize-handle="true" onMouseDown={makeResizeHandler({ left: true })} style={styles.edgeMidLeft} />
@@ -756,100 +609,40 @@ const handleBase = {
   zIndex: 5,
 };
 
-const cornerHandle = {
-  ...handleBase,
-  width: 14, height: 14,
-  borderRadius: 3,
-};
-
-const edgeMidHandle = {
-  ...handleBase,
-  width: 12, height: 12,
-  borderRadius: '50%',
-};
+const cornerHandle = { ...handleBase, width: 14, height: 14, borderRadius: 3 };
+const edgeMidHandle = { ...handleBase, width: 12, height: 12, borderRadius: '50%' };
 
 const styles = {
   root: {
     flex: 1, display: 'flex', flexDirection: 'column',
     position: 'relative', overflow: 'hidden',
   },
-  canvasViewport: {
-    flex: 1, overflow: 'hidden',
+  scrollArea: {
+    flex: 1, overflow: 'auto',
     display: 'flex', justifyContent: 'center', alignItems: 'flex-start',
     background: tokens.bgPageGradient,
+    padding: '24px 24px 60px',
   },
-  canvasBody: {
-    flex: 1, position: 'relative',
-    backgroundColor: '#FFFFFF', overflow: 'hidden',
+  stageRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: PL_GAP,
   },
-
-  // ── Overview ──
-  overviewLabel: {
-    display: 'flex', alignItems: 'center', gap: 6,
+  canvas: {
+    position: 'relative',
+    backgroundColor: tokens.canvasBg,
+    borderRadius: tokens.radiusLg,
+    boxShadow: `${tokens.shadowRest}, 0 0 0 1px ${tokens.border}`,
+    flexShrink: 0,
+    overflow: 'hidden',
+  },
+  bpLabel: {
     fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
     color: tokens.text3,
-    padding: '4px 10px',
+    padding: '4px 10px', marginBottom: 8,
     borderRadius: tokens.radiusFull,
     backgroundColor: 'rgba(255,255,255,0.7)',
     alignSelf: 'flex-start',
-  },
-  overviewFrame: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: tokens.radiusLg,
-    boxShadow: `${tokens.shadowRest}, 0 0 0 1px ${tokens.border}`,
-    display: 'flex', flexDirection: 'column',
-    position: 'relative', overflow: 'visible', flexShrink: 0,
-    transition: `box-shadow ${tokens.durNormal} ${tokens.easeOut}`,
-  },
-  emptyMirror: {
-    position: 'absolute', inset: 0,
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#FAFAFA',
-  },
-  addBpWrap: {
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    alignSelf: 'center',
-  },
-  addBpBtn: {
-    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-    padding: '12px 16px',
-    border: `2px dashed ${tokens.controlBorder}`,
-    borderRadius: tokens.radiusXl,
-    backgroundColor: 'rgba(255,255,255,0.5)',
-    cursor: 'pointer',
-    fontSize: 11, fontWeight: 500, color: tokens.text3,
-    transition: `all ${tokens.durFast} ${tokens.easeOut}`,
-  },
-
-  // ── Focus mode ──
-  focusLabel: {
-    display: 'flex', alignItems: 'center', gap: 6,
-    fontSize: 12, fontWeight: 600, letterSpacing: '0.04em',
-    color: '#fff',
-    padding: '5px 14px',
-    borderRadius: tokens.radiusFull,
-    backgroundColor: tokens.accent,
-    alignSelf: 'center',
-    boxShadow: tokens.shadowSubtle,
-  },
-  focusFrame: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: tokens.radiusLg,
-    boxShadow: `0 0 0 2px ${tokens.accent}, ${tokens.shadowRest}`,
-    display: 'flex', flexDirection: 'column',
-    position: 'relative', overflow: 'visible', flexShrink: 0,
-  },
-  edgeHandle: {
-    width: 24, cursor: 'ew-resize',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    flexShrink: 0, zIndex: 10,
-  },
-  edgeHandleBar: {
-    width: 4, height: 48,
-    borderRadius: 2,
-    backgroundColor: tokens.accent,
-    opacity: 0.35,
-    transition: `opacity ${tokens.durFast} ${tokens.easeOut}`,
   },
 
   // ── Parking Lot ──
@@ -886,12 +679,10 @@ const styles = {
     fontSize: 10, color: tokens.accent,
     fontFamily: 'monospace', whiteSpace: 'nowrap', pointerEvents: 'none',
   },
-  // Corner squares — resize both axes
   cornerSE: { ...cornerHandle, right: -7, bottom: -7, cursor: 'nwse-resize' },
   cornerNE: { ...cornerHandle, right: -7, top: -7, cursor: 'nesw-resize' },
   cornerSW: { ...cornerHandle, left: -7, bottom: -7, cursor: 'nesw-resize' },
   cornerNW: { ...cornerHandle, left: -7, top: -7, cursor: 'nwse-resize' },
-  // Edge-mid circles — single axis
   edgeMidTop:    { ...edgeMidHandle, top: -6, left: '50%', marginLeft: -6, cursor: 'ns-resize' },
   edgeMidBottom: { ...edgeMidHandle, bottom: -6, left: '50%', marginLeft: -6, cursor: 'ns-resize' },
   edgeMidLeft:   { ...edgeMidHandle, left: -6, top: '50%', marginTop: -6, cursor: 'ew-resize' },
@@ -923,5 +714,23 @@ const styles = {
   },
   loadingContent: {
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16,
+  },
+  sectionLabel: {
+    position: 'absolute', top: 4, left: 8, zIndex: 10,
+    fontSize: 9, fontWeight: 600, letterSpacing: '0.06em',
+    color: tokens.text3, textTransform: 'uppercase',
+    pointerEvents: 'none', opacity: 0.6,
+  },
+  sectionEmpty: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    height: 80, fontSize: 11, color: tokens.text3,
+    pointerEvents: 'none',
+  },
+  addSectionBtn: {
+    width: '100%', padding: '6px 0',
+    border: 'none', background: 'transparent',
+    cursor: 'pointer', fontSize: 11, fontWeight: 500,
+    color: tokens.accent, textAlign: 'center',
+    transition: `background-color 150ms ${tokens.easeOut}`,
   },
 };

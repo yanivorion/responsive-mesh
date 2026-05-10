@@ -1,11 +1,11 @@
 import React, { useCallback, useState } from 'react';
-import { Monitor, Tablet, Smartphone, Trash2, ChevronDown, ChevronRight, ChevronLeft, PanelRightOpen, ParkingCircle } from 'lucide-react';
+import { Monitor, Tablet, Smartphone, Trash2, ChevronDown, ChevronRight, ChevronLeft, PanelRightOpen, ParkingCircle, Anchor, Move } from 'lucide-react';
 import { UNITS, UNIT_LABELS, BREAKPOINTS, BREAKPOINT_IDS, RESPONSIVE_BEHAVIORS, ARCHETYPES } from '../engine/responsiveUnits.js';
 import { tokens } from './designTokens.js';
 
 const BP_ICONS = { desktop: Monitor, tablet: Tablet, mobile: Smartphone };
 
-export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdateProp, onChangeBehavior, onRemoveElement, onParkElement, onUnparkElement }) {
+export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdateProp, onChangeBehavior, onRemoveElement, onParkElement, onUnparkElement, onUpdateDocking, isHighestBreakpoint = true }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const bpProps = element?.responsiveProps?.[breakpointId] || {};
@@ -23,8 +23,8 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
   const beh = RESPONSIVE_BEHAVIORS[currentBehavior];
 
   return (
-    <div style={{ position: 'relative', display: 'flex', flexShrink: 0 }}>
-      {/* Chevron toggle tab — always visible on the left edge */}
+    <div style={{ position: 'relative', display: 'flex', flexShrink: 0, width: open ? 260 : 28 }}>
+      {/* Chevron toggle tab — always visible */}
       <button onClick={onToggle} style={styles.toggleTab}>
         {open
           ? <ChevronRight size={14} strokeWidth={2} color={tokens.text3} />
@@ -40,6 +40,7 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
         transition: `width 200ms ${tokens.easeOut}, opacity 150ms ${tokens.easeOut}`,
         pointerEvents: open ? 'auto' : 'none',
         overflow: 'hidden',
+        marginLeft: open ? 0 : 28,
       }}>
         {!open ? null : !element ? (
           <div style={styles.emptyState}>
@@ -57,7 +58,7 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
           </div>
         </div>
       </div>
-      {isParked && onUnparkElement && (
+      {isHighestBreakpoint && isParked && onUnparkElement && (
         <button
           onClick={() => onUnparkElement(element.id)}
           style={styles.moveToStageBtn}
@@ -65,7 +66,7 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
           Move to Stage
         </button>
       )}
-      {!isParked && onParkElement && (
+      {isHighestBreakpoint && !isParked && onParkElement && (
         <button
           onClick={() => onParkElement(element.id, 'left', 40, 40)}
           style={styles.moveToParkingBtn}
@@ -83,7 +84,7 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
               key={bp}
               style={{
                 ...styles.bpDot,
-                backgroundColor: active ? tokens.accent : 'rgba(0,0,0,0.04)',
+                backgroundColor: active ? tokens.accent : tokens.inputBg,
                 color: active ? '#FFFFFF' : tokens.text3,
               }}
             >
@@ -108,7 +109,7 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
                 onClick={() => onChangeBehavior && onChangeBehavior(bKey)}
                 style={{
                   ...styles.behaviorBtn,
-                  backgroundColor: active ? tokens.accent : 'rgba(0,0,0,0.03)',
+                  backgroundColor: active ? tokens.accent : tokens.inputBg,
                   color: active ? '#fff' : tokens.text2,
                   borderColor: active ? tokens.accent : tokens.controlBorder,
                 }}
@@ -131,6 +132,13 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
           <PropInput label="X" prop={effectiveProps.x} onChange={(v) => onUpdateProp('x', v)} />
           <PropInput label="Y" prop={effectiveProps.y} onChange={(v) => onUpdateProp('y', v)} />
         </div>
+        {onUpdateDocking && (
+          <DockingToggle
+            xUnit={effectiveProps.x?.unit || 'px'}
+            yUnit={effectiveProps.y?.unit || 'px'}
+            onToggle={(mode) => onUpdateDocking(element.id, mode)}
+          />
+        )}
 
         <SectionHeader title="Size" />
         <div style={styles.propRow}>
@@ -184,6 +192,43 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
   );
 }
 
+function DockingToggle({ xUnit, yUnit, onToggle }) {
+  const isDocked = xUnit === 'px' && yUnit === 'px';
+  const isFloat = xUnit === 'spx' && yUnit === 'spx';
+  const mode = isDocked ? 'dock' : isFloat ? 'float' : 'mixed';
+
+  return (
+    <div style={styles.dockingRow}>
+      <button
+        onClick={() => onToggle('float')}
+        style={{
+          ...styles.dockBtn,
+          backgroundColor: mode === 'float' ? tokens.accentSoft : tokens.inputBg,
+          color: mode === 'float' ? tokens.accent : tokens.text3,
+          borderColor: mode === 'float' ? tokens.accent : tokens.controlBorder,
+        }}
+        title="Float — position scales proportionally (spx)"
+      >
+        <Move size={11} strokeWidth={2} />
+        <span>Float</span>
+      </button>
+      <button
+        onClick={() => onToggle('dock')}
+        style={{
+          ...styles.dockBtn,
+          backgroundColor: mode === 'dock' ? tokens.accentSoft : tokens.inputBg,
+          color: mode === 'dock' ? tokens.accent : tokens.text3,
+          borderColor: mode === 'dock' ? tokens.accent : tokens.controlBorder,
+        }}
+        title="Dock — position is fixed in px"
+      >
+        <Anchor size={11} strokeWidth={2} />
+        <span>Dock</span>
+      </button>
+    </div>
+  );
+}
+
 function SectionHeader({ title }) {
   return <div style={styles.sectionHeader}>{title}</div>;
 }
@@ -232,12 +277,12 @@ function PropInput({ label, prop, onChange }) {
 
 const styles = {
   toggleTab: {
-    position: 'absolute', left: -28, top: 12,
+    position: 'absolute', left: 0, top: 12,
     width: 28, height: 28, zIndex: 10,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     border: `1px solid ${tokens.border}`, borderRight: 'none',
     borderRadius: '6px 0 0 6px',
-    backgroundColor: 'rgba(255,255,255,0.85)',
+    backgroundColor: tokens.glassStrong,
     backdropFilter: 'blur(12px)',
     WebkitBackdropFilter: 'blur(12px)',
     cursor: 'pointer',
@@ -248,7 +293,7 @@ const styles = {
   },
   panel: {
     minWidth: 0,
-    backgroundColor: 'rgba(255,255,255,0.70)',
+    backgroundColor: tokens.glassStrong,
     backdropFilter: 'blur(24px) saturate(180%)',
     WebkitBackdropFilter: 'blur(24px) saturate(180%)',
     borderLeft: `1px solid ${tokens.border}`,
@@ -288,7 +333,7 @@ const styles = {
   propRow: { display: 'flex', gap: 6, padding: '2px 12px' },
   propInputWrap: {
     flex: 1, display: 'flex', alignItems: 'center', gap: 2,
-    backgroundColor: 'rgba(0,0,0,0.03)', borderRadius: tokens.radiusMd,
+    backgroundColor: tokens.inputBg, borderRadius: tokens.radiusMd,
     padding: '3px 4px', border: `1px solid ${tokens.controlBorder}`,
   },
   propLabel: {
@@ -335,7 +380,7 @@ const styles = {
   },
   parkedBadge: {
     fontSize: 9, fontWeight: 600, color: tokens.text3,
-    backgroundColor: 'rgba(0,0,0,0.06)',
+    backgroundColor: tokens.inputBg,
     padding: '1px 6px', borderRadius: tokens.radiusFull,
     letterSpacing: '0.04em', textTransform: 'uppercase',
   },
@@ -350,9 +395,19 @@ const styles = {
   moveToParkingBtn: {
     width: 'calc(100% - 24px)', margin: '0 12px', padding: '7px 0',
     border: `1px solid ${tokens.controlBorder}`, borderRadius: tokens.radiusMd,
-    backgroundColor: 'rgba(0,0,0,0.02)', color: tokens.text2,
+    backgroundColor: tokens.inputBg, color: tokens.text2,
     fontSize: 11, fontWeight: 500, cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
     transition: `background-color ${tokens.durFast} ${tokens.easeOut}`,
+  },
+  dockingRow: {
+    display: 'flex', gap: 4, padding: '4px 12px',
+  },
+  dockBtn: {
+    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+    padding: '5px 8px', fontSize: 10, fontWeight: 600,
+    border: '1px solid', borderRadius: tokens.radiusMd,
+    cursor: 'pointer', whiteSpace: 'nowrap',
+    transition: `all ${tokens.durFast} ${tokens.easeOut}`,
   },
 };

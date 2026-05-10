@@ -5,7 +5,6 @@ import {
   MousePointer2, Square, Minus,
   LayoutGrid, ListOrdered, Video,
   Code,
-  // category icons
   Layers, Package, PanelTop, Puzzle, LayoutTemplate,
   BoxSelect, Ruler, TypeIcon, RectangleHorizontal,
   Menu, ImageIcon, Gem, Mail, Globe,
@@ -14,9 +13,11 @@ import {
   Database, Hexagon, Play, Repeat,
 } from 'lucide-react';
 import { tokens, glassPanel } from './designTokens.js';
+import { LAYOUT_PRESETS, SECTION_PRESETS } from '../data/layoutPresets.js';
 
 const CATEGORIES = [
   { id: 'quick-add', label: 'Quick Add' },
+  { id: 'layouts', label: 'Layouts' },
   { id: 'assets', label: 'Assets' },
   { id: 'sections', label: 'Sections' },
   { id: 'design-kits', label: 'Design Kits' },
@@ -56,7 +57,7 @@ const QUICK_ADD_ELEMENTS = [
   { id: 'iframe',     name: 'IFrame',    icon: Code,           defaultW: 400, defaultH: 300 },
 ];
 
-export function AddElementsPanel({ open, onClose, onAddElement }) {
+export function AddElementsPanel({ open, onClose, onAddElement, onAddLayout, onAddSection }) {
   const [activeCategory, setActiveCategory] = useState('quick-add');
   const [searchQuery, setSearchQuery] = useState('');
   const [hoveredEl, setHoveredEl] = useState(null);
@@ -170,6 +171,67 @@ export function AddElementsPanel({ open, onClose, onAddElement }) {
                 );
               })}
             </div>
+          ) : activeCategory === 'layouts' ? (
+            <div style={styles.layoutGrid}>
+              {LAYOUT_PRESETS.map((preset) => {
+                const isHovered = hoveredEl === preset.id;
+                return (
+                  <div
+                    key={preset.id}
+                    onClick={() => onAddLayout && onAddLayout(preset.spec)}
+                    onMouseEnter={() => setHoveredEl(preset.id)}
+                    onMouseLeave={() => setHoveredEl(null)}
+                    style={{
+                      ...styles.layoutCard,
+                      borderColor: isHovered ? tokens.accent : tokens.controlBorder,
+                      boxShadow: isHovered ? tokens.shadowHover : 'none',
+                      transform: isHovered ? 'translateY(-2px)' : 'translateY(0)',
+                    }}
+                  >
+                    <div style={styles.layoutThumb}>
+                      <LayoutTemplate size={28} color={isHovered ? tokens.accent : tokens.text3} strokeWidth={1.2} />
+                    </div>
+                    <div style={styles.layoutInfo}>
+                      <span style={{ ...styles.layoutName, color: isHovered ? tokens.accent : tokens.text1 }}>
+                        {preset.name}
+                      </span>
+                      <span style={styles.layoutDesc}>{preset.description}</span>
+                      <span style={styles.layoutCategory}>{preset.category}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : activeCategory === 'sections' ? (
+            <div style={styles.layoutGrid}>
+              {SECTION_PRESETS.map((preset) => {
+                const isHovered = hoveredEl === preset.id;
+                return (
+                  <div
+                    key={preset.id}
+                    onClick={() => onAddSection && onAddSection(preset.spec)}
+                    onMouseEnter={() => setHoveredEl(preset.id)}
+                    onMouseLeave={() => setHoveredEl(null)}
+                    style={{
+                      ...styles.layoutCard,
+                      borderColor: isHovered ? tokens.accent : tokens.controlBorder,
+                      boxShadow: isHovered ? tokens.shadowHover : 'none',
+                      transform: isHovered ? 'translateY(-2px)' : 'translateY(0)',
+                    }}
+                  >
+                    <div style={styles.layoutThumb}>
+                      <Layers size={24} color={isHovered ? tokens.accent : tokens.text3} strokeWidth={1.2} />
+                    </div>
+                    <div style={styles.layoutInfo}>
+                      <span style={{ ...styles.layoutName, color: isHovered ? tokens.accent : tokens.text1 }}>
+                        {preset.name}
+                      </span>
+                      <span style={styles.layoutDesc}>{preset.description}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           ) : (
             <div style={styles.placeholder}>
               <span style={styles.placeholderText}>{CATEGORIES.find(c => c.id === activeCategory)?.label}</span>
@@ -188,7 +250,7 @@ const styles = {
     top: 0,
     left: 0,
     bottom: 0,
-    zIndex: 50,
+    zIndex: 10000,
     display: 'flex',
     flexDirection: 'column',
     ...glassPanel('opaque'),
@@ -221,7 +283,7 @@ const styles = {
     alignItems: 'center',
     gap: 6,
     padding: '5px 10px',
-    backgroundColor: 'rgba(0,0,0,0.04)',
+    backgroundColor: tokens.inputBg,
     borderRadius: tokens.radiusFull,
     border: `1px solid ${tokens.controlBorder}`,
   },
@@ -289,7 +351,7 @@ const styles = {
     padding: '16px 8px',
     borderRadius: tokens.radiusLg,
     border: `1px solid ${tokens.controlBorder}`,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: tokens.inputBg,
     cursor: 'grab',
     transition: `all ${tokens.durNormal} ${tokens.easeSpring}`,
     userSelect: 'none',
@@ -316,5 +378,41 @@ const styles = {
   placeholderSub: {
     fontSize: 12,
     color: tokens.text3,
+  },
+  layoutGrid: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+  },
+  layoutCard: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 12,
+    borderRadius: tokens.radiusLg,
+    border: `1px solid ${tokens.controlBorder}`,
+    backgroundColor: tokens.inputBg,
+    cursor: 'pointer',
+    transition: `all ${tokens.durNormal} ${tokens.easeSpring}`,
+    userSelect: 'none',
+  },
+  layoutThumb: {
+    width: 52, height: 52, flexShrink: 0,
+    borderRadius: tokens.radiusMd,
+    backgroundColor: tokens.pillBg,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  layoutInfo: {
+    display: 'flex', flexDirection: 'column', gap: 3, flex: 1, minWidth: 0,
+  },
+  layoutName: {
+    fontSize: 13, fontWeight: 600,
+  },
+  layoutDesc: {
+    fontSize: 11, color: tokens.text3, lineHeight: 1.35,
+  },
+  layoutCategory: {
+    fontSize: 10, fontWeight: 600, color: tokens.accent,
+    textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: 2,
   },
 };

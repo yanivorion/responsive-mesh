@@ -93,7 +93,7 @@ const styles = {
   root: {
     position: 'absolute', left: 0, top: 0,
     width: 220, height: '100%',
-    backgroundColor: 'rgba(255,255,255,0.92)',
+    backgroundColor: tokens.glassStrong,
     backdropFilter: 'blur(24px)',
     WebkitBackdropFilter: 'blur(24px)',
     borderRight: `1px solid ${tokens.border}`,
@@ -119,7 +119,7 @@ const styles = {
   groupTitle: { fontWeight: 600, fontSize: 11 },
   groupCount: {
     marginLeft: 'auto', fontSize: 10, color: tokens.text3,
-    backgroundColor: 'rgba(0,0,0,0.04)', padding: '1px 5px',
+    backgroundColor: tokens.inputBg, padding: '1px 5px',
     borderRadius: tokens.radiusFull,
   },
   layerItem: {

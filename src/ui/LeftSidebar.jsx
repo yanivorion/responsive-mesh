@@ -9,7 +9,7 @@ export function LeftSidebar({ width, onOpenInspiration, onToggleAddElements, add
     <div
       style={{
         width,
-        backgroundColor: 'rgba(255,255,255,0.70)',
+        backgroundColor: tokens.glassStrong,
         backdropFilter: 'blur(24px) saturate(180%)',
         WebkitBackdropFilter: 'blur(24px) saturate(180%)',
         borderRight: `1px solid ${tokens.border}`,

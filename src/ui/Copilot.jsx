@@ -10,6 +10,7 @@ export function Copilot({
   onExpand,
   onCollapse,
   onSubmit,
+  onQuickCommand,
   inputRef,
   copilotRef,
   prefersReducedMotion,
@@ -61,8 +62,8 @@ export function Copilot({
             transition: prefersReducedMotion ? 'none' : `all 450ms ${smoothEase}`,
           }}
         >
-          <div style={{ backgroundColor: '#FFFFFF', borderRadius: 18, overflow: 'hidden' }}>
-            {!expanded && <CollapsedState />}
+          <div style={{ backgroundColor: tokens.glass, borderRadius: 18, overflow: 'hidden' }}>
+            {!expanded && <CollapsedState onSuggestion={onQuickCommand} />}
             {expanded && (
               <ExpandedState
                 showContent={showContent}
@@ -81,10 +82,29 @@ export function Copilot({
   );
 }
 
-function CollapsedState() {
+const SUGGESTIONS = [
+  'Add a button',
+  'Add 3 images',
+  'Add a title and paragraph',
+  'Switch to mobile',
+  'Clear all',
+];
+
+function CollapsedState({ onSuggestion }) {
   return (
     <div style={{ padding: '14px 16px' }}>
-      <div style={{ fontSize: 15, color: tokens.text3, marginBottom: 12 }}>Message Copilot</div>
+      <div style={{ fontSize: 15, color: tokens.text3, marginBottom: 10 }}>Message Copilot</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+        {SUGGESTIONS.map((s) => (
+          <button
+            key={s}
+            onClick={(e) => { e.stopPropagation(); onSuggestion(s); }}
+            style={styles.chip}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <button style={styles.iconBtn}>
           <Plus size={18} color={tokens.text4} strokeWidth={1.5} />
@@ -154,6 +174,18 @@ const styles = {
     border: `1px solid ${tokens.controlBorder}`,
     backgroundColor: 'transparent',
     cursor: 'pointer',
+  },
+  chip: {
+    padding: '5px 12px',
+    fontSize: 12,
+    fontWeight: 500,
+    color: tokens.text2,
+    backgroundColor: tokens.inputBg,
+    border: `1px solid ${tokens.controlBorder}`,
+    borderRadius: tokens.radiusFull,
+    cursor: 'pointer',
+    transition: `all ${tokens.durFast} ${tokens.easeOut}`,
+    whiteSpace: 'nowrap',
   },
   micBtn: {
     display: 'flex',
