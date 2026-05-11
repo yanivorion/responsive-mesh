@@ -1348,7 +1348,9 @@ function StageElement({ element, isSelected, onSelect, onMove, onResize, breakpo
           zIndex: 2,
         }} />
       )}
-      <div style={styles.nameTag}>{element.name}</div>
+      {isSelected && (
+        <div style={styles.nameTag}>{element.name}</div>
+      )}
       {isSelected && (
         <>
           <div style={styles.unitBadgeX}>
@@ -1602,11 +1604,12 @@ const styles = {
 
   // ── Stage element ──
   nameTag: {
-    position: 'absolute', top: 4, left: 4,
+    position: 'absolute', top: -16, left: 4,
     fontSize: 10, fontWeight: 600, color: '#FFFFFF',
     backgroundColor: `${tokens.accent}dd`,
     padding: '2px 6px', borderRadius: tokens.radiusSm,
     pointerEvents: 'none', letterSpacing: '0.02em',
+    whiteSpace: 'nowrap',
   },
   unitBadgeX: {
     position: 'absolute', bottom: -20, left: 0,
