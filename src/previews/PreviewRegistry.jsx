@@ -37,19 +37,19 @@ export function PreviewRegistry({ id, width, height, props, elementId, fontScale
     case 'container':
       return <ContainerPreview width={width} height={height} props={props} />;
     case 'line':
-      return <LinePreview width={width} height={height} />;
+      return <LinePreview width={width} height={height} props={props} />;
     case 'gallery':
-      return <GalleryPreview width={width} height={height} />;
+      return <GalleryPreview width={width} height={height} props={props} />;
     case 'menu':
-      return <MenuPreview width={width} height={height} />;
+      return <MenuPreview width={width} height={height} props={props} />;
     case 'shape':
-      return <ShapePreview width={width} height={height} />;
+      return <ShapePreview width={width} height={height} props={props} />;
     case 'repeater':
-      return <RepeaterPreview width={width} height={height} />;
+      return <RepeaterPreview width={width} height={height} props={props} />;
     case 'video':
-      return <VideoPreview width={width} height={height} />;
+      return <VideoPreview width={width} height={height} props={props} />;
     case 'iframe':
-      return <IFramePreview width={width} height={height} />;
+      return <IFramePreview width={width} height={height} props={props} />;
 
     // Generative algorithm previews
     case 'physarum':
