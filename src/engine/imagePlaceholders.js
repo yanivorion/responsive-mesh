@@ -32,6 +32,13 @@ export const PLACEHOLDER_IMAGES = [
   ph('06'), ph('07'), ph('08'), ph('09')
 ];
 
+const stk = (n) => `${BASE}placeholders/stock-${n}.png`.replace(/\/{2,}/g, '/');
+
+export const STOCK_IMAGES = [
+  stk('01'), stk('02'), stk('03'), stk('04'),
+  stk('05'), stk('06'), stk('07'), stk('08'),
+];
+
 // 32-bit FNV-1a — small, stable, no deps. Good enough for spreading element
 // ids over a fixed pool. Works on any string-coercible seed.
 function hashString(str) {

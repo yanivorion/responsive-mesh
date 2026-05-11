@@ -1,26 +1,31 @@
 import React, { useCallback, useState } from 'react';
-import { Monitor, Tablet, Smartphone, Trash2, ChevronDown, ChevronRight, ChevronLeft, PanelRightOpen } from 'lucide-react';
+import { Monitor, Tablet, Smartphone, Trash2, ChevronDown, ChevronRight, ChevronLeft, PanelRightOpen, ParkingCircle, Anchor, Move } from 'lucide-react';
 import { UNITS, UNIT_LABELS, BREAKPOINTS, BREAKPOINT_IDS, RESPONSIVE_BEHAVIORS, ARCHETYPES } from '../engine/responsiveUnits.js';
+import { STOCK_IMAGES, PLACEHOLDER_IMAGES } from '../engine/imagePlaceholders.js';
 import { tokens } from './designTokens.js';
 
 const BP_ICONS = { desktop: Monitor, tablet: Tablet, mobile: Smartphone };
 
-export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdateProp, onChangeBehavior, onRemoveElement }) {
+export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdateProp, onUpdateElementProps, onChangeBehavior, onRemoveElement, onParkElement, onUnparkElement, onUpdateDocking, isHighestBreakpoint = true }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const bpProps = element?.responsiveProps?.[breakpointId] || {};
   const desktopProps = element?.responsiveProps?.desktop || {};
   const effectiveProps = { ...desktopProps, ...bpProps };
 
+  const isParked = element?.location === 'parkingLot';
   const archetype = element?.archetype || element?.componentId;
   const archetypeDef = archetype ? ARCHETYPES[archetype] : null;
-  const allowedBehaviors = archetypeDef?.behaviors || Object.keys(RESPONSIVE_BEHAVIORS);
+  let allowedBehaviors = archetypeDef?.behaviors || Object.keys(RESPONSIVE_BEHAVIORS);
+  if (isParked) {
+    allowedBehaviors = allowedBehaviors.filter((b) => b !== 'stretch');
+  }
   const currentBehavior = element?.behavior || archetypeDef?.defaultBehavior || 'scaleProportionally';
   const beh = RESPONSIVE_BEHAVIORS[currentBehavior];
 
   return (
-    <div style={{ position: 'relative', display: 'flex', flexShrink: 0 }}>
-      {/* Chevron toggle tab — always visible on the left edge */}
+    <div style={{ position: 'relative', display: 'flex', flexShrink: 0, width: open ? 260 : 28, transition: 'width 300ms cubic-bezier(0.22,1,0.36,1)' }}>
+      {/* Chevron toggle tab — always visible */}
       <button onClick={onToggle} style={styles.toggleTab}>
         {open
           ? <ChevronRight size={14} strokeWidth={2} color={tokens.text3} />
@@ -33,9 +38,11 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
         width: open ? 260 : 0,
         borderLeftWidth: open ? 1 : 0,
         opacity: open ? 1 : 0,
-        transition: `width 200ms ${tokens.easeOut}, opacity 150ms ${tokens.easeOut}`,
+        transform: open ? 'translateX(0)' : 'translateX(8px)',
+        transition: 'width 300ms cubic-bezier(0.22,1,0.36,1), opacity 250ms cubic-bezier(0.22,1,0.36,1), transform 300ms cubic-bezier(0.22,1,0.36,1), margin-left 300ms cubic-bezier(0.22,1,0.36,1)',
         pointerEvents: open ? 'auto' : 'none',
         overflow: 'hidden',
+        marginLeft: open ? 0 : 28,
       }}>
         {!open ? null : !element ? (
           <div style={styles.emptyState}>
@@ -45,9 +52,30 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
       <div style={styles.header}>
         <div>
           <div style={styles.name}>{element.name}</div>
-          <div style={styles.id}>{element.componentId}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+            <span style={styles.id}>{element.componentId}</span>
+            {isParked && (
+              <span style={styles.parkedBadge}>Parked</span>
+            )}
+          </div>
         </div>
       </div>
+      {isHighestBreakpoint && isParked && onUnparkElement && (
+        <button
+          onClick={() => onUnparkElement(element.id)}
+          style={styles.moveToStageBtn}
+        >
+          Move to Stage
+        </button>
+      )}
+      {isHighestBreakpoint && !isParked && onParkElement && (
+        <button
+          onClick={() => onParkElement(element.id, 'left', 40, 40)}
+          style={styles.moveToParkingBtn}
+        >
+          Move to Parking Lot
+        </button>
+      )}
 
       <div style={styles.bpIndicator}>
         {BREAKPOINT_IDS.map((bp) => {
@@ -58,7 +86,7 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
               key={bp}
               style={{
                 ...styles.bpDot,
-                backgroundColor: active ? tokens.accent : 'rgba(0,0,0,0.04)',
+                backgroundColor: active ? tokens.accent : tokens.inputBg,
                 color: active ? '#FFFFFF' : tokens.text3,
               }}
             >
@@ -83,7 +111,7 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
                 onClick={() => onChangeBehavior && onChangeBehavior(bKey)}
                 style={{
                   ...styles.behaviorBtn,
-                  backgroundColor: active ? tokens.accent : 'rgba(0,0,0,0.03)',
+                  backgroundColor: active ? tokens.accent : tokens.inputBg,
                   color: active ? '#fff' : tokens.text2,
                   borderColor: active ? tokens.accent : tokens.controlBorder,
                 }}
@@ -106,12 +134,27 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
           <PropInput label="X" prop={effectiveProps.x} onChange={(v) => onUpdateProp('x', v)} />
           <PropInput label="Y" prop={effectiveProps.y} onChange={(v) => onUpdateProp('y', v)} />
         </div>
+        {onUpdateDocking && (
+          <DockingToggle
+            xUnit={effectiveProps.x?.unit || 'px'}
+            yUnit={effectiveProps.y?.unit || 'px'}
+            onToggle={(mode) => onUpdateDocking(element.id, mode)}
+          />
+        )}
 
         <SectionHeader title="Size" />
         <div style={styles.propRow}>
           <PropInput label="W" prop={effectiveProps.width} onChange={(v) => onUpdateProp('width', v)} />
           <PropInput label="H" prop={effectiveProps.height} onChange={(v) => onUpdateProp('height', v)} />
         </div>
+
+        {/* Image picker for image elements */}
+        {(element.componentId === 'image') && onUpdateElementProps && (
+          <ImagePicker
+            currentSrc={element.props?.src}
+            onSelect={(src) => onUpdateElementProps('src', src)}
+          />
+        )}
 
         {/* Advanced toggle for manual unit control */}
         <button
@@ -155,6 +198,43 @@ export function InspectorPanel({ open, onToggle, element, breakpointId, onUpdate
       </div>
       </>)}
       </div>
+    </div>
+  );
+}
+
+function DockingToggle({ xUnit, yUnit, onToggle }) {
+  const isDocked = xUnit === 'px' && yUnit === 'px';
+  const isFloat = xUnit === 'spx' && yUnit === 'spx';
+  const mode = isDocked ? 'dock' : isFloat ? 'float' : 'mixed';
+
+  return (
+    <div style={styles.dockingRow}>
+      <button
+        onClick={() => onToggle('float')}
+        style={{
+          ...styles.dockBtn,
+          backgroundColor: mode === 'float' ? tokens.accentSoft : tokens.inputBg,
+          color: mode === 'float' ? tokens.accent : tokens.text3,
+          borderColor: mode === 'float' ? tokens.accent : tokens.controlBorder,
+        }}
+        title="Float — position scales proportionally (spx)"
+      >
+        <Move size={11} strokeWidth={2} />
+        <span>Float</span>
+      </button>
+      <button
+        onClick={() => onToggle('dock')}
+        style={{
+          ...styles.dockBtn,
+          backgroundColor: mode === 'dock' ? tokens.accentSoft : tokens.inputBg,
+          color: mode === 'dock' ? tokens.accent : tokens.text3,
+          borderColor: mode === 'dock' ? tokens.accent : tokens.controlBorder,
+        }}
+        title="Dock — position is fixed in px"
+      >
+        <Anchor size={11} strokeWidth={2} />
+        <span>Dock</span>
+      </button>
     </div>
   );
 }
@@ -205,14 +285,75 @@ function PropInput({ label, prop, onChange }) {
   );
 }
 
+const ALL_IMAGES = [...STOCK_IMAGES, ...PLACEHOLDER_IMAGES];
+
+function ImagePicker({ currentSrc, onSelect }) {
+  return (
+    <>
+      <SectionHeader title="Image" />
+      <div style={imgPickerStyles.grid}>
+        {ALL_IMAGES.map((src, i) => {
+          const active = currentSrc === src;
+          return (
+            <button
+              key={i}
+              onClick={() => onSelect(src)}
+              style={{
+                ...imgPickerStyles.thumb,
+                outline: active ? `2px solid ${tokens.accent}` : '2px solid transparent',
+                outlineOffset: -2,
+              }}
+            >
+              <img
+                src={src}
+                alt=""
+                draggable={false}
+                style={imgPickerStyles.img}
+              />
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+const imgPickerStyles = {
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: 4,
+    padding: '4px 12px',
+  },
+  thumb: {
+    position: 'relative',
+    aspectRatio: '16 / 10',
+    border: 'none',
+    borderRadius: 6,
+    overflow: 'hidden',
+    cursor: 'pointer',
+    padding: 0,
+    background: tokens.inputBg,
+    transition: `outline-color 150ms ${tokens.easeOut}`,
+  },
+  img: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    display: 'block',
+    userSelect: 'none',
+    pointerEvents: 'none',
+  },
+};
+
 const styles = {
   toggleTab: {
-    position: 'absolute', left: -28, top: 12,
+    position: 'absolute', left: 0, top: 12,
     width: 28, height: 28, zIndex: 10,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     border: `1px solid ${tokens.border}`, borderRight: 'none',
     borderRadius: '6px 0 0 6px',
-    backgroundColor: 'rgba(255,255,255,0.85)',
+    backgroundColor: tokens.glassStrong,
     backdropFilter: 'blur(12px)',
     WebkitBackdropFilter: 'blur(12px)',
     cursor: 'pointer',
@@ -223,7 +364,7 @@ const styles = {
   },
   panel: {
     minWidth: 0,
-    backgroundColor: 'rgba(255,255,255,0.70)',
+    backgroundColor: tokens.glassStrong,
     backdropFilter: 'blur(24px) saturate(180%)',
     WebkitBackdropFilter: 'blur(24px) saturate(180%)',
     borderLeft: `1px solid ${tokens.border}`,
@@ -263,7 +404,7 @@ const styles = {
   propRow: { display: 'flex', gap: 6, padding: '2px 12px' },
   propInputWrap: {
     flex: 1, display: 'flex', alignItems: 'center', gap: 2,
-    backgroundColor: 'rgba(0,0,0,0.03)', borderRadius: tokens.radiusMd,
+    backgroundColor: tokens.inputBg, borderRadius: tokens.radiusMd,
     padding: '3px 4px', border: `1px solid ${tokens.controlBorder}`,
   },
   propLabel: {
@@ -307,5 +448,37 @@ const styles = {
     fontSize: 12, fontWeight: 500, cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
     transition: `background-color ${tokens.durFast} ${tokens.easeOut}`,
+  },
+  parkedBadge: {
+    fontSize: 9, fontWeight: 600, color: tokens.text3,
+    backgroundColor: tokens.inputBg,
+    padding: '1px 6px', borderRadius: tokens.radiusFull,
+    letterSpacing: '0.04em', textTransform: 'uppercase',
+  },
+  moveToStageBtn: {
+    width: 'calc(100% - 24px)', margin: '0 12px', padding: '7px 0',
+    border: `1px solid ${tokens.accent}`, borderRadius: tokens.radiusMd,
+    backgroundColor: tokens.accentSoft, color: tokens.accent,
+    fontSize: 11, fontWeight: 600, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+    transition: `background-color ${tokens.durFast} ${tokens.easeOut}`,
+  },
+  moveToParkingBtn: {
+    width: 'calc(100% - 24px)', margin: '0 12px', padding: '7px 0',
+    border: `1px solid ${tokens.controlBorder}`, borderRadius: tokens.radiusMd,
+    backgroundColor: tokens.inputBg, color: tokens.text2,
+    fontSize: 11, fontWeight: 500, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+    transition: `background-color ${tokens.durFast} ${tokens.easeOut}`,
+  },
+  dockingRow: {
+    display: 'flex', gap: 4, padding: '4px 12px',
+  },
+  dockBtn: {
+    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+    padding: '5px 8px', fontSize: 10, fontWeight: 600,
+    border: '1px solid', borderRadius: tokens.radiusMd,
+    cursor: 'pointer', whiteSpace: 'nowrap',
+    transition: `all ${tokens.durFast} ${tokens.easeOut}`,
   },
 };

@@ -12,8 +12,9 @@ const sysFont = tokens.fontUI;
 
 export function ImagePreview({ width, height, props, elementId }) {
   const p = props || {};
-  const seed = p.src || p.id || elementId || `${width}.${height}`;
-  const src = pickPlaceholder(seed);
+  const hasExplicitSrc = p.src && (p.src.startsWith('/') || p.src.startsWith('http') || p.src.startsWith('data:'));
+  const seed = p.id || elementId || `${width}.${height}`;
+  const src = hasExplicitSrc ? p.src : pickPlaceholder(seed);
   return (
     <div style={{
       width: '100%', height: '100%', position: 'relative', overflow: 'hidden',

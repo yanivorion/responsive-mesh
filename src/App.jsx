@@ -482,6 +482,22 @@ export default function Component({ config = {} }) {
     [selectedElementId, breakpointId]
   );
 
+  const handleUpdateElementProps = useCallback(
+    (propKey, value) => {
+      if (!selectedElementId) return;
+      setElements((prev) =>
+        prev.map((el) => {
+          if (el.id !== selectedElementId) return el;
+          return {
+            ...el,
+            props: { ...el.props, [propKey]: value },
+          };
+        })
+      );
+    },
+    [selectedElementId]
+  );
+
   const handleChangeBehavior = useCallback(
     (behaviorKey) => {
       if (!selectedElementId) return;
@@ -825,6 +841,7 @@ export default function Component({ config = {} }) {
             element={selectedElement}
             breakpointId={breakpointId}
             onUpdateProp={handleUpdateProp}
+            onUpdateElementProps={handleUpdateElementProps}
             onChangeBehavior={handleChangeBehavior}
             onRemoveElement={handleRemoveElement}
             onParkElement={handleParkElement}
